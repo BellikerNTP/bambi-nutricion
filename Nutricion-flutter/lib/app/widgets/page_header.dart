@@ -7,13 +7,13 @@ class PageHeader extends StatelessWidget {
     super.key,
     required this.title,
     this.description,
-    required this.selectedCasa,
+    required this.selectedSede,
     this.actions,
   });
 
   final String title;
   final String? description;
-  final Casa selectedCasa;
+  final Sede selectedSede;
   final Widget? actions;
 
   @override
@@ -47,7 +47,7 @@ class PageHeader extends StatelessWidget {
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
-                        selectedCasa.nombre,
+                        selectedSede.nombre,
                         style: TextStyle(
                           color: Colors.green.shade700,
                           fontWeight: FontWeight.w600,

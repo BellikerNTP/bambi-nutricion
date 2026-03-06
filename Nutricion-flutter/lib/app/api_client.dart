@@ -66,21 +66,3 @@ class ApiClient {
     throw ApiException(message);
   }
 }
-
-/// Mapea la `Casa` del front al `sedeId` usado en Mongo/Backend.
-String mapCasaToSedeId(String casaNombre) {
-  switch (casaNombre) {
-    case 'Casa Principal':
-      return 'CASA_PRINCIPAL';
-    case 'Casa Ángeles':
-      return 'CASA_ANGELES';
-    case 'Casa Esperanza':
-      return 'CASA_ESPERANZA';
-    case 'Casa Estrellas':
-      return 'CASA_ESTRELLAS';
-    case 'Casa Sueños':
-      return 'CASA_SUENOS';
-    default:
-      return 'CASA_PRINCIPAL';
-  }
-}

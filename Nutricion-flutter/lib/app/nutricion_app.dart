@@ -3,6 +3,7 @@ import '../features/inventario/inventario_screen.dart';
 import '../features/platos_servidos/platos_servidos_screen.dart';
 import 'models.dart';
 import 'widgets/sidebar.dart';
+import 'api_client.dart';
 
 class NutricionApp extends StatelessWidget {
   const NutricionApp({super.key});
@@ -31,10 +32,63 @@ class _NutricionHome extends StatefulWidget {
 
 class _NutricionHomeState extends State<_NutricionHome> {
   ViewType _currentView = ViewType.inventario;
-  Casa _selectedCasa = casas.first;
+  final ApiClient _apiClient = ApiClient();
+  List<Sede> _sedes = const [];
+  Sede? _selectedSede;
+  bool _cargandoSedes = true;
+  String? _errorSedes;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarSedes();
+  }
+
+  Future<void> _cargarSedes() async {
+    setState(() {
+      _cargandoSedes = true;
+      _errorSedes = null;
+    });
+
+    try {
+      final sedesJson = await _apiClient.getJsonList(
+        '/sedes',
+        query: {'activa': 'true'},
+      );
+
+      final sedes = sedesJson
+          .map((e) => Sede.fromJson(e as Map<String, dynamic>))
+          .toList();
+
+      setState(() {
+        _sedes = sedes;
+        _selectedSede = sedes.isNotEmpty ? sedes.first : null;
+        _cargandoSedes = false;
+      });
+    } catch (e) {
+      setState(() {
+        _cargandoSedes = false;
+        _errorSedes = 'Error al cargar sedes: $e';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_cargandoSedes) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_errorSedes != null || _selectedSede == null) {
+      return Scaffold(
+        body: Center(
+          child: Text(_errorSedes ?? 'No hay sedes disponibles'),
+        ),
+      );
+    }
+
     return Scaffold(
       body: Row(
         children: [
@@ -45,10 +99,11 @@ class _NutricionHomeState extends State<_NutricionHome> {
                 _currentView = view;
               });
             },
-            selectedCasa: _selectedCasa,
-            onCasaChange: (casa) {
+            sedes: _sedes,
+            selectedSede: _selectedSede!,
+            onSedeChange: (sede) {
               setState(() {
-                _selectedCasa = casa;
+                _selectedSede = sede;
               });
             },
           ),
@@ -63,9 +118,12 @@ class _NutricionHomeState extends State<_NutricionHome> {
   Widget _buildView() {
     switch (_currentView) {
       case ViewType.platos:
-        return PlatosServidosScreen(selectedCasa: _selectedCasa);
+        return PlatosServidosScreen(selectedSede: _selectedSede!);
       case ViewType.inventario:
-        return InventarioScreen(selectedCasa: _selectedCasa);
+        return InventarioScreen(
+          selectedSede: _selectedSede!,
+          sedes: _sedes,
+        );
     }
   }
 }

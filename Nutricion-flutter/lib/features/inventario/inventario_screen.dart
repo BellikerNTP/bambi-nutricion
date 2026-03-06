@@ -5,9 +5,14 @@ import '../../app/widgets/page_header.dart';
 import '../../app/api_client.dart';
 
 class InventarioScreen extends StatefulWidget {
-  const InventarioScreen({super.key, required this.selectedCasa});
+  const InventarioScreen({
+    super.key,
+    required this.selectedSede,
+    required this.sedes,
+  });
 
-  final Casa selectedCasa;
+  final Sede selectedSede;
+  final List<Sede> sedes;
 
   @override
   State<InventarioScreen> createState() => _InventarioScreenState();
@@ -44,7 +49,7 @@ class _InventarioScreenState extends State<InventarioScreen>
   @override
   void didUpdateWidget(covariant InventarioScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedCasa.id != widget.selectedCasa.id) {
+    if (oldWidget.selectedSede.id != widget.selectedSede.id) {
       _cargarDatosIniciales();
     }
   }
@@ -55,7 +60,7 @@ class _InventarioScreenState extends State<InventarioScreen>
       _error = null;
     });
 
-    final sedeId = mapCasaToSedeId(widget.selectedCasa.nombre);
+    final sedeId = widget.selectedSede.id;
 
     try {
       final productosJson = await _apiClient.getJsonList(
@@ -68,6 +73,10 @@ class _InventarioScreenState extends State<InventarioScreen>
         query: {'sedeId': sedeId},
       );
 
+      final sedesById = {
+        for (final s in widget.sedes) s.id: s.nombre,
+      };
+
       final productos = productosJson
           .map((e) => _Producto(
                 id: e['id'] as String,
@@ -76,21 +85,36 @@ class _InventarioScreenState extends State<InventarioScreen>
                 cantidad: (e['cantidadActual'] as num).toInt(),
                 unidad: e['unidad'] as String,
                 stockMinimo: (e['stockMinimo'] as num).toInt(),
-                estado: e['estado'] as String,
+                estado: _mapEstadoBackend(e['estado'] as String?),
               ))
           .toList();
 
       final transacciones = historialJson
-          .map((e) => _Transaccion(
-                id: e['id'] as String,
-                fecha: (e['fecha'] as String?) ?? '',
-                tipo: e['tipo'] as String,
-                producto: e['producto'] as String,
-                cantidad: (e['cantidad'] as num).toInt(),
-                origen: e['origen'] as String?,
-                destino: e['destino'] as String?,
-                motivo: e['motivo'] as String? ?? '',
-              ))
+          .map((e) {
+            final fechaRaw = e['fecha'] as String?;
+            final fecha = _formatFecha(fechaRaw);
+
+            final origenId = e['origen'] as String?;
+            final destinoId = e['destino'] as String?;
+
+            final origenNombre = origenId != null
+                ? (sedesById[origenId] ?? origenId)
+                : null;
+            final destinoNombre = destinoId != null
+                ? (sedesById[destinoId] ?? destinoId)
+                : null;
+
+            return _Transaccion(
+              id: e['id'] as String,
+              fecha: fecha,
+              tipo: e['tipo'] as String,
+              producto: e['producto'] as String,
+              cantidad: (e['cantidad'] as num).toInt(),
+              origen: origenNombre,
+              destino: destinoNombre,
+              motivo: e['motivo'] as String? ?? '',
+            );
+          })
           .toList();
 
       setState(() {
@@ -132,7 +156,7 @@ class _InventarioScreenState extends State<InventarioScreen>
         PageHeader(
           title: 'Inventario',
           description: 'Gestión de inventario y transacciones',
-          selectedCasa: widget.selectedCasa,
+          selectedSede: widget.selectedSede,
           actions: FilledButton.icon(
             onPressed: _openNuevaTransaccion,
             style: FilledButton.styleFrom(
@@ -178,7 +202,7 @@ class _InventarioScreenState extends State<InventarioScreen>
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            '${filtered.length} productos en ${widget.selectedCasa.nombre}',
+                            '${filtered.length} productos en ${widget.selectedSede.nombre}',
                             style: TextStyle(
                               color: Colors.grey.shade600,
                             ),
@@ -243,14 +267,41 @@ class _InventarioScreenState extends State<InventarioScreen>
     showDialog<void>(
       context: context,
       builder: (context) {
-        final sedeId = mapCasaToSedeId(widget.selectedCasa.nombre);
+        final sedeId = widget.selectedSede.id;
+        final sedesDestino = widget.sedes
+            .where((s) => s.id != widget.selectedSede.id)
+            .toList(growable: false);
         return _NuevaTransaccionDialog(
           productos: _productos,
           sedeId: sedeId,
+          sedesDestino: sedesDestino,
           onSaved: _cargarDatosIniciales,
         );
       },
     );
+  }
+}
+
+String _mapEstadoBackend(String? raw) {
+  switch (raw) {
+    case 'STOCK_BAJO':
+      return 'Stock Bajo';
+    case 'NORMAL':
+    default:
+      return 'Normal';
+  }
+}
+
+String _formatFecha(String? raw) {
+  if (raw == null || raw.isEmpty) return '';
+  try {
+    final dt = DateTime.parse(raw);
+    final day = dt.day.toString().padLeft(2, '0');
+    final month = dt.month.toString().padLeft(2, '0');
+    final year = dt.year.toString();
+    return '$day/$month/$year';
+  } catch (_) {
+    return raw;
   }
 }
 
@@ -271,7 +322,7 @@ class _Producto {
   final int cantidad;
   final String unidad;
   final int stockMinimo;
-   final String estado;
+  final String estado;
 }
 
 class _Transaccion {
@@ -294,6 +345,16 @@ class _Transaccion {
   final String? origen;
   final String? destino;
   final String motivo;
+}
+
+bool _esCategoriaViveres(String categoria) {
+  final c = categoria.toLowerCase();
+  return c.contains('viver');
+}
+
+bool _esCategoriaFrutasHortalizas(String categoria) {
+  final c = categoria.toLowerCase();
+  return c.contains('fruta') || c.contains('hortaliza') || c.contains('verdura');
 }
 
 const List<_Producto> _mockProductos = [
@@ -393,8 +454,8 @@ const List<_Transaccion> _mockTransacciones = [
     tipo: 'transferencia',
     producto: 'Aceite',
     cantidad: 3,
-    origen: 'Casa Principal',
-    destino: 'Casa Ángeles',
+    origen: 'Bambi Enlace',
+    destino: 'Bambi II',
     motivo: 'Préstamo',
   ),
   _Transaccion(
@@ -539,27 +600,29 @@ class _InventarioTable extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      child: DataTable(
-        columnSpacing: 28,
-        columns: const [
-          DataColumn(label: Text('Producto')),
-          DataColumn(label: Text('Categoría')),
-          DataColumn(label: Text('Cantidad')),
-          DataColumn(label: Text('Stock mínimo')),
-          DataColumn(label: Text('Estado')),
-        ],
-        rows: [
-          for (final p in productos)
-            DataRow(
-              cells: [
-                DataCell(Text(p.nombre)),
-                DataCell(Text(p.categoria)),
-                DataCell(Text('${p.cantidad} ${p.unidad}')),
-                DataCell(Text('${p.stockMinimo} ${p.unidad}')),
-                DataCell(_EstadoChip(estado: p.estado)),
-              ],
-            ),
-        ],
+      child: SingleChildScrollView(
+        child: DataTable(
+          columnSpacing: 28,
+          columns: const [
+            DataColumn(label: Text('Producto')),
+            DataColumn(label: Text('Categoría')),
+            DataColumn(label: Text('Cantidad')),
+            DataColumn(label: Text('Stock mínimo')),
+            DataColumn(label: Text('Estado')),
+          ],
+          rows: [
+            for (final p in productos)
+              DataRow(
+                cells: [
+                  DataCell(Text(p.nombre)),
+                  DataCell(Text(p.categoria)),
+                  DataCell(Text('${p.cantidad} ${p.unidad}')),
+                  DataCell(Text('${p.stockMinimo} ${p.unidad}')),
+                  DataCell(_EstadoChip(estado: p.estado)),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -617,6 +680,8 @@ class _TransaccionesList extends StatelessWidget {
         return const Color(0xFFDC2626);
       case 'transferencia':
         return const Color(0xFF2563EB);
+      case 'ajuste':
+        return const Color(0xFFF97316);
       default:
         return Colors.grey;
     }
@@ -630,6 +695,8 @@ class _TransaccionesList extends StatelessWidget {
         return 'Salida';
       case 'transferencia':
         return 'Transferencia';
+      case 'ajuste':
+        return 'Ajuste';
       default:
         return tipo;
     }
@@ -643,6 +710,8 @@ class _TransaccionesList extends StatelessWidget {
         return Icons.arrow_upward;
       case 'transferencia':
         return Icons.swap_horiz;
+      case 'ajuste':
+        return Icons.rule_folder;
       default:
         return Icons.help_outline;
     }
@@ -752,11 +821,13 @@ class _NuevaTransaccionDialog extends StatefulWidget {
   const _NuevaTransaccionDialog({
     required this.productos,
     required this.sedeId,
+    required this.sedesDestino,
     required this.onSaved,
   });
 
   final List<_Producto> productos;
   final String sedeId;
+  final List<Sede> sedesDestino;
   final Future<void> Function() onSaved;
 
   @override
@@ -765,11 +836,26 @@ class _NuevaTransaccionDialog extends StatefulWidget {
 
 class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
   String _tipo = 'entrada';
-  final TextEditingController _cantidadController = TextEditingController();
-  final TextEditingController _motivoController = TextEditingController();
+  final TextEditingController _motivoEntradaController =
+      TextEditingController();
+  final TextEditingController _motivoTransferenciaController =
+      TextEditingController();
+  final TextEditingController _motivoAjusteController =
+      TextEditingController();
+
+    final TextEditingController _busquedaProductoController =
+      TextEditingController();
+    String _terminoBusquedaProducto = '';
+
+  // Para entradas: cantidad por producto
+  final Map<String, String> _cantidadesEntrada = {};
+
+  // Para transferencias: producto y sede destino
   late String _productoSeleccionadoId;
-  String _origenId = casas.first.id;
-  String _destinoId = casas.length > 1 ? casas[1].id : casas.first.id;
+  String? _sedeDestinoId;
+
+  // Para ajustes: cantidad final (conteo real) por producto
+  final Map<String, String> _cantidadesAjuste = {};
 
   final ApiClient _apiClient = ApiClient();
 
@@ -778,22 +864,34 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
     super.initState();
     _productoSeleccionadoId =
         widget.productos.isNotEmpty ? widget.productos.first.id : '';
+    if (widget.sedesDestino.isNotEmpty) {
+      _sedeDestinoId = widget.sedesDestino.first.id;
+    }
   }
 
   @override
   void dispose() {
-    _cantidadController.dispose();
-    _motivoController.dispose();
+    _motivoEntradaController.dispose();
+    _motivoTransferenciaController.dispose();
+    _motivoAjusteController.dispose();
+    _busquedaProductoController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Registrar Transacción'),
-      content: SingleChildScrollView(
+    final baseTheme = Theme.of(context);
+
+    return Theme(
+      data: baseTheme.copyWith(
+        textTheme: baseTheme.textTheme.apply(fontSizeFactor: 1.2),
+      ),
+      child: AlertDialog(
+        title: const Text('Registrar Transacción'),
+        content: SizedBox(
+          width: 1100,
+          height: 540,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Tipo de transacción'),
@@ -808,133 +906,90 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
                   onChanged: _onTipoChanged,
                 ),
                 _TipoChip(
-                  label: 'Salida',
-                  value: 'salida',
-                  groupValue: _tipo,
-                  onChanged: _onTipoChanged,
-                ),
-                _TipoChip(
-                  label: 'Transferencia',
+                  label: 'Transferencia a otra sede',
                   value: 'transferencia',
                   groupValue: _tipo,
                   onChanged: _onTipoChanged,
                 ),
+                _TipoChip(
+                  label: 'Ajuste de inventario',
+                  value: 'ajuste',
+                  groupValue: _tipo,
+                  onChanged: _onTipoChanged,
+                ),
               ],
             ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _productoSeleccionadoId.isEmpty
-                  ? null
-                  : _productoSeleccionadoId,
-              decoration: const InputDecoration(
-                labelText: 'Producto',
-                border: OutlineInputBorder(),
-              ),
-              items: [
-                for (final p in widget.productos)
-                  DropdownMenuItem(
-                    value: p.id,
-                    child: Text(p.nombre),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value != null) {
+            const SizedBox(height: 12),
+            if (_tipo == 'entrada' || _tipo == 'ajuste') ...[
+              TextField(
+                controller: _busquedaProductoController,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  hintText: 'Buscar rubro por nombre...',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                onChanged: (value) {
                   setState(() {
-                    _productoSeleccionadoId = value;
+                    _terminoBusquedaProducto = value;
                   });
-                }
-              },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _cantidadController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Cantidad',
-                border: OutlineInputBorder(),
+                },
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _motivoController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Motivo',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (_tipo == 'transferencia') ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _origenId,
-                      decoration: const InputDecoration(
-                        labelText: 'Casa origen',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        for (final c in casas)
-                          DropdownMenuItem(
-                            value: c.id,
-                            child: Text(c.nombre),
-                          ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _origenId = value;
-                          });
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _destinoId,
-                      decoration: const InputDecoration(
-                        labelText: 'Casa destino',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        for (final c in casas)
-                          DropdownMenuItem(
-                            value: c.id,
-                            child: Text(c.nombre),
-                          ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _destinoId = value;
-                          });
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
+              const SizedBox(height: 12),
             ],
-            const SizedBox(height: 8),
-            const Text(
-              'La transacción se registrará en el sistema de inventario.',
-              style: TextStyle(fontSize: 11, color: Colors.grey),
+            Expanded(
+              child: Builder(
+                builder: (context) {
+                  if (_tipo == 'entrada') {
+                    return _EntradaForm(
+                      productos: widget.productos,
+                      cantidadesEntrada: _cantidadesEntrada,
+                      motivoController: _motivoEntradaController,
+                      terminoBusqueda: _terminoBusquedaProducto,
+                    );
+                  }
+                  if (_tipo == 'transferencia') {
+                    return _TransferenciaForm(
+                      productos: widget.productos,
+                      productoSeleccionadoId: _productoSeleccionadoId,
+                      onProductoChanged: (value) {
+                        setState(() {
+                          _productoSeleccionadoId = value;
+                        });
+                      },
+                      sedesDestino: widget.sedesDestino,
+                      sedeDestinoId: _sedeDestinoId,
+                      onSedeDestinoChanged: (value) {
+                        setState(() {
+                          _sedeDestinoId = value;
+                        });
+                      },
+                      motivoController: _motivoTransferenciaController,
+                    );
+                  }
+                  return _AjusteForm(
+                    productos: widget.productos,
+                    cantidadesAjuste: _cantidadesAjuste,
+                    motivoController: _motivoAjusteController,
+                    terminoBusqueda: _terminoBusquedaProducto,
+                  );
+                },
+              ),
             ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton(
-          onPressed: _onSubmit,
-          child: const Text('Guardar'),
-        ),
-      ],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: _onSubmit,
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -945,58 +1000,582 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
   }
 
   void _onSubmit() {
-    final cantidad = int.tryParse(_cantidadController.text);
-    if (cantidad == null || cantidad <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('La cantidad debe ser un número mayor a 0.'),
-        ),
-      );
-      return;
-    }
+    if (_tipo == 'entrada') {
+      // Preparar una lista de movimientos de entrada (uno por producto con cantidad > 0)
+      final movimientos = <Future<void>>[];
 
-    if (_productoSeleccionadoId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona un producto.')),
-      );
-      return;
-    }
+      for (final p in widget.productos) {
+        final raw = _cantidadesEntrada[p.id]?.trim();
+        if (raw == null || raw.isEmpty) continue;
+        final cantidad = int.tryParse(raw);
+        if (cantidad == null || cantidad <= 0) continue;
 
-    final motivo = _motivoController.text.trim();
+        final motivo = _motivoEntradaController.text.trim();
 
-    () async {
-      try {
-        await _apiClient.postJson(
+        movimientos.add(_apiClient.postJson(
           '/inventario/movimiento',
           {
-            'tipo': _tipo,
-            'productoId': _productoSeleccionadoId,
+            'tipo': 'entrada',
+            'productoId': p.id,
             'sedeId': widget.sedeId,
             'cantidad': cantidad,
             'motivo': motivo.isEmpty ? null : motivo,
-            'sedeOrigenId': _tipo == 'transferencia' ? _origenId : null,
-            'sedeDestinoId': _tipo == 'transferencia' ? _destinoId : null,
+            'sedeOrigenId': null,
+            'sedeDestinoId': null,
           },
-        );
-
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Transacción registrada correctamente.')),
-        );
-
-        await widget.onSaved();
-
-        if (mounted) {
-          Navigator.of(context).pop();
-        }
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al registrar transacción: $e')),
-        );
+        ));
       }
-    }();
+
+      if (movimientos.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ingresa al menos una cantidad válida para registrar una entrada.'),
+          ),
+        );
+        return;
+      }
+
+      () async {
+        try {
+          await Future.wait(movimientos);
+
+          if (!mounted) return;
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Entradas registradas correctamente.')),
+          );
+
+          await widget.onSaved();
+
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error al registrar entradas: $e')),
+          );
+        }
+      }();
+    } else if (_tipo == 'transferencia') {
+      if (_productoSeleccionadoId.isEmpty || _sedeDestinoId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Selecciona un producto y una sede destino.'),
+          ),
+        );
+        return;
+      }
+
+      final motivo = _motivoTransferenciaController.text.trim();
+      final sedeDestinoId = _sedeDestinoId!;
+
+      () async {
+        try {
+          await _apiClient.postJson(
+            '/inventario/movimiento',
+            {
+              'tipo': 'transferencia',
+              'productoId': _productoSeleccionadoId,
+              'sedeId': widget.sedeId,
+              'cantidad': 0, // se calculará en el backend
+              'motivo': motivo.isEmpty ? null : motivo,
+              'sedeOrigenId': widget.sedeId,
+              'sedeDestinoId': sedeDestinoId,
+            },
+          );
+
+          if (!mounted) return;
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Transferencia registrada correctamente.')),
+          );
+
+          await widget.onSaved();
+
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error al registrar transferencia: $e')),
+          );
+        }
+      }();
+    } else if (_tipo == 'ajuste') {
+      // Ajuste: para cada producto al que se le indique un conteo,
+      // se ajusta el inventario a esa cantidad final.
+      final movimientos = <Future<void>>[];
+
+      for (final p in widget.productos) {
+        final raw = _cantidadesAjuste[p.id]?.trim();
+        if (raw == null || raw.isEmpty) continue;
+        final cantidadFinal = int.tryParse(raw);
+        if (cantidadFinal == null || cantidadFinal < 0) continue;
+
+        // Validación básica en front: no permitir valores mayores al inventario actual
+        if (cantidadFinal > p.cantidad) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'El conteo para ${p.nombre} no puede ser mayor que la cantidad actual (${p.cantidad}).',
+              ),
+            ),
+          );
+          return;
+        }
+
+        final motivo = _motivoAjusteController.text.trim();
+
+        movimientos.add(_apiClient.postJson(
+          '/inventario/movimiento',
+          {
+            'tipo': 'ajuste',
+            'productoId': p.id,
+            'sedeId': widget.sedeId,
+            // El backend interpreta "cantidad" como cantidad final deseada para el ajuste.
+            'cantidad': cantidadFinal,
+            'motivo': motivo.isEmpty ? null : motivo,
+            'sedeOrigenId': null,
+            'sedeDestinoId': null,
+          },
+        ));
+      }
+
+      if (movimientos.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ingresa al menos un conteo válido para registrar un ajuste.'),
+          ),
+        );
+        return;
+      }
+
+      () async {
+        try {
+          await Future.wait(movimientos);
+
+          if (!mounted) return;
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Ajustes registrados correctamente.')),
+          );
+
+          await widget.onSaved();
+
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error al registrar ajustes: $e')),
+          );
+        }
+      }();
+    }
+  }
+}
+
+class _EntradaForm extends StatelessWidget {
+  const _EntradaForm({
+    required this.productos,
+    required this.cantidadesEntrada,
+    required this.motivoController,
+    required this.terminoBusqueda,
+  });
+
+  final List<_Producto> productos;
+  final Map<String, String> cantidadesEntrada;
+  final TextEditingController motivoController;
+  final String terminoBusqueda;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<_Producto> viveres = [];
+    final List<_Producto> frutasYHortalizas = [];
+    final List<_Producto> otros = [];
+
+    final filtro = terminoBusqueda.toLowerCase().trim();
+
+    for (final p in productos) {
+      final coincideBusqueda =
+          filtro.isEmpty || p.nombre.toLowerCase().contains(filtro);
+      if (!coincideBusqueda) continue;
+
+      if (_esCategoriaViveres(p.categoria)) {
+        viveres.add(p);
+      } else if (_esCategoriaFrutasHortalizas(p.categoria)) {
+        frutasYHortalizas.add(p);
+      } else {
+        otros.add(p);
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Cantidades compradas por producto'),
+        const SizedBox(height: 4),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _ColumnaCategoriaEntrada(
+                  titulo: 'Víveres',
+                  productos: viveres,
+                  cantidadesEntrada: cantidadesEntrada,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _ColumnaCategoriaEntrada(
+                  titulo: 'Frutas y hortalizas',
+                  productos: frutasYHortalizas,
+                  cantidadesEntrada: cantidadesEntrada,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _ColumnaCategoriaEntrada(
+                  titulo: 'Otros',
+                  productos: otros,
+                  cantidadesEntrada: cantidadesEntrada,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: motivoController,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'Motivo (opcional, se aplicará a todos)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Se registrará una entrada por cada producto con cantidad > 0.',
+          style: TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+      ],
+    );
+  }
+}
+
+class _TransferenciaForm extends StatelessWidget {
+  const _TransferenciaForm({
+    required this.productos,
+    required this.productoSeleccionadoId,
+    required this.onProductoChanged,
+    required this.sedesDestino,
+    required this.sedeDestinoId,
+    required this.onSedeDestinoChanged,
+    required this.motivoController,
+  });
+
+  final List<_Producto> productos;
+  final String productoSeleccionadoId;
+  final ValueChanged<String> onProductoChanged;
+  final List<Sede> sedesDestino;
+  final String? sedeDestinoId;
+  final ValueChanged<String?> onSedeDestinoChanged;
+  final TextEditingController motivoController;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          value: productoSeleccionadoId.isEmpty ? null : productoSeleccionadoId,
+          decoration: const InputDecoration(
+            labelText: 'Producto a transferir',
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            for (final p in productos)
+              DropdownMenuItem(
+                value: p.id,
+                child: Text(p.nombre),
+              ),
+          ],
+          onChanged: (value) {
+            if (value != null) {
+              onProductoChanged(value);
+            }
+          },
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          value: sedeDestinoId,
+          decoration: const InputDecoration(
+            labelText: 'Sede destino',
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            for (final s in sedesDestino)
+              DropdownMenuItem(
+                value: s.id,
+                child: Text(s.nombre),
+              ),
+          ],
+          onChanged: (value) {
+            onSedeDestinoChanged(value);
+          },
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: motivoController,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'Motivo (opcional)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Se calculará automáticamente la cantidad a transferir según el stock mínimo en la sede destino. '
+          'Esa cantidad se restará del inventario de la sede actual y se sumará al inventario de la sede destino.',
+          style: TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+      ],
+    );
+  }
+}
+
+class _AjusteForm extends StatelessWidget {
+  const _AjusteForm({
+    required this.productos,
+    required this.cantidadesAjuste,
+    required this.motivoController,
+    required this.terminoBusqueda,
+  });
+
+  final List<_Producto> productos;
+  final Map<String, String> cantidadesAjuste;
+  final TextEditingController motivoController;
+  final String terminoBusqueda;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<_Producto> viveres = [];
+    final List<_Producto> frutasYHortalizas = [];
+    final List<_Producto> otros = [];
+
+    final filtro = terminoBusqueda.toLowerCase().trim();
+
+    for (final p in productos) {
+      final coincideBusqueda =
+          filtro.isEmpty || p.nombre.toLowerCase().contains(filtro);
+      if (!coincideBusqueda) continue;
+
+      if (_esCategoriaViveres(p.categoria)) {
+        viveres.add(p);
+      } else if (_esCategoriaFrutasHortalizas(p.categoria)) {
+        frutasYHortalizas.add(p);
+      } else {
+        otros.add(p);
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Conteo real por producto'),
+        const SizedBox(height: 4),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _ColumnaCategoriaAjuste(
+                  titulo: 'Víveres',
+                  productos: viveres,
+                  cantidadesAjuste: cantidadesAjuste,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _ColumnaCategoriaAjuste(
+                  titulo: 'Frutas y hortalizas',
+                  productos: frutasYHortalizas,
+                  cantidadesAjuste: cantidadesAjuste,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _ColumnaCategoriaAjuste(
+                  titulo: 'Otros',
+                  productos: otros,
+                  cantidadesAjuste: cantidadesAjuste,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: motivoController,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'Motivo (opcional, se aplicará a todos)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Se registrará un ajuste por cada producto con conteo ingresado. '
+          'En el historial verás como "cantidad" la diferencia entre el inventario anterior y el conteo real.',
+          style: TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+      ],
+    );
+  }
+}
+
+class _ColumnaCategoriaEntrada extends StatelessWidget {
+  const _ColumnaCategoriaEntrada({
+    required this.titulo,
+    required this.productos,
+    required this.cantidadesEntrada,
+  });
+
+  final String titulo;
+  final List<_Producto> productos;
+  final Map<String, String> cantidadesEntrada;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          titulo,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Expanded(
+          child: ListView.builder(
+            itemCount: productos.length,
+            itemBuilder: (context, index) {
+              final p = productos[index];
+              final key = p.id;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: Text(p.nombre),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Cant.',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (value) {
+                          cantidadesEntrada[key] = value;
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ColumnaCategoriaAjuste extends StatelessWidget {
+  const _ColumnaCategoriaAjuste({
+    required this.titulo,
+    required this.productos,
+    required this.cantidadesAjuste,
+  });
+
+  final String titulo;
+  final List<_Producto> productos;
+  final Map<String, String> cantidadesAjuste;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          titulo,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Expanded(
+          child: ListView.builder(
+            itemCount: productos.length,
+            itemBuilder: (context, index) {
+              final p = productos[index];
+              final key = p.id;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(p.nombre),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Actual: ${p.cantidad} ${p.unidad}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade700,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Conteo',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (value) {
+                          cantidadesAjuste[key] = value;
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
   }
 }
 

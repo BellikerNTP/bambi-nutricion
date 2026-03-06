@@ -5,9 +5,9 @@ import '../../app/models.dart';
 import '../../app/widgets/page_header.dart';
 
 class PlatosServidosScreen extends StatefulWidget {
-  const PlatosServidosScreen({super.key, required this.selectedCasa});
+  const PlatosServidosScreen({super.key, required this.selectedSede});
 
-  final Casa selectedCasa;
+  final Sede selectedSede;
 
   @override
   State<PlatosServidosScreen> createState() => _PlatosServidosScreenState();
@@ -41,7 +41,7 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
   @override
   void didUpdateWidget(covariant PlatosServidosScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedCasa.id != widget.selectedCasa.id) {
+    if (oldWidget.selectedSede.id != widget.selectedSede.id) {
       _resetForm();
       _cargarHistorial();
       _cargarIngredientesDisponibles();
@@ -55,7 +55,7 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
         PageHeader(
           title: 'Platos Servidos',
           description: 'Registro diario de platos servidos',
-          selectedCasa: widget.selectedCasa,
+          selectedSede: widget.selectedSede,
           actions: FilledButton.icon(
             onPressed: () {
               setState(() {
@@ -127,16 +127,15 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
     } else {
       final parsed = int.tryParse(_cantidadPersonas);
       if (parsed == null || parsed <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content:
-                Text('La cantidad de personas debe ser un número mayor a 0.'),
-          ),
-        );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('La cantidad de personas debe ser un número mayor a 0.'),
+            ),
+          );
         return;
       }
 
-      final sedeId = mapCasaToSedeId(widget.selectedCasa.nombre);
+      final sedeId = widget.selectedSede.id;
       final cargoBackend = _mapCargoBackend(_cargo);
 
       final ingredientesPayload = _ingredientesSeleccionados
@@ -267,7 +266,7 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
       _cargandoHistorial = true;
     });
 
-    final sedeId = mapCasaToSedeId(widget.selectedCasa.nombre);
+    final sedeId = widget.selectedSede.id;
 
     try {
       final data = await _apiClient.getJsonList(
@@ -302,7 +301,7 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
       _cargandoIngredientes = true;
     });
 
-    final sedeId = mapCasaToSedeId(widget.selectedCasa.nombre);
+    final sedeId = widget.selectedSede.id;
 
     try {
       final data = await _apiClient.getJsonList(
@@ -629,7 +628,7 @@ class _RegistroStepper extends StatelessWidget {
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 12),
                         child: Text(
-                          'No hay ingredientes disponibles en el inventario de esta casa.',
+                          'No hay ingredientes disponibles en el inventario de esta sede.',
                         ),
                       )
                     else ...[
@@ -916,8 +915,8 @@ class _PlatosRecientesCard extends StatelessWidget {
                 else
                   Text(
                     registros.isEmpty
-                        ? 'No hay registros recientes para esta casa.'
-                        : 'Últimos platos servidos en la casa seleccionada',
+                        ? 'No hay registros recientes para esta sede.'
+                        : 'Últimos platos servidos en la sede seleccionada',
                     style: TextStyle(
                       color: Colors.grey.shade600,
                       fontSize: 13,

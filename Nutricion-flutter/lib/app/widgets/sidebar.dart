@@ -9,14 +9,16 @@ class Sidebar extends StatelessWidget {
     super.key,
     required this.currentView,
     required this.onViewChange,
-    required this.selectedCasa,
-    required this.onCasaChange,
+    required this.sedes,
+    required this.selectedSede,
+    required this.onSedeChange,
   });
 
   final ViewType currentView;
   final ValueChanged<ViewType> onViewChange;
-  final Casa selectedCasa;
-  final ValueChanged<Casa> onCasaChange;
+  final List<Sede> sedes;
+  final Sede selectedSede;
+  final ValueChanged<Sede> onSedeChange;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +45,7 @@ class Sidebar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildHeader(),
-          _buildCasaSelector(),
+          _buildSedeSelector(),
           Expanded(child: _buildMenu()),
           _buildFooter(),
         ],
@@ -83,7 +85,7 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  Widget _buildCasaSelector() {
+  Widget _buildSedeSelector() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       decoration: const BoxDecoration(
@@ -95,7 +97,7 @@ class Sidebar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Casa Actual',
+            'Sede Actual',
             style: TextStyle(
               color: Color(0xFFA7F3D0),
               fontSize: 11,
@@ -111,22 +113,24 @@ class Sidebar extends StatelessWidget {
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
-                value: selectedCasa.id,
+                value: selectedSede.id,
                 iconEnabledColor: Colors.white,
                 dropdownColor: const Color(0xFF166534),
                 style: const TextStyle(color: Colors.white, fontSize: 13),
                 onChanged: (value) {
-                  final casa = casas.firstWhere(
-                    (c) => c.id == value,
-                    orElse: () => casas.first,
+                  if (value == null) return;
+                  if (sedes.isEmpty) return;
+                  final sede = sedes.firstWhere(
+                    (s) => s.id == value,
+                    orElse: () => sedes.first,
                   );
-                  onCasaChange(casa);
+                  onSedeChange(sede);
                 },
                 items: [
-                  for (final casa in casas)
+                  for (final sede in sedes)
                     DropdownMenuItem(
-                      value: casa.id,
-                      child: Text(casa.nombre),
+                      value: sede.id,
+                      child: Text(sede.nombre),
                     ),
                 ],
               ),

@@ -1,5 +1,5 @@
 // Creación de colecciones ("tablas") para la app de nutrición
-// Ejecutar primero:  mongosh < 00_crear_tablas.js
+// Ejecutar primero:  mongosh < CREATE.js
 
 const dbName = 'nutricion_hogar_bambi';
 const dbConn = db.getSiblingDB(dbName);
@@ -16,11 +16,8 @@ dbConn.createCollection('sedes', {
       properties: {
         _id: { bsonType: 'string' }, // ej: CASA_PRINCIPAL
         nombre: { bsonType: 'string' },
-        codigo: { bsonType: 'string' }, // ej: CP
-        direccion: { bsonType: ['string', 'null'] },
-        telefono: { bsonType: ['string', 'null'] },
-        activa: { bsonType: 'bool' },
-        creadoEn: { bsonType: ['date', 'null'] },
+        codigo: { bsonType: 'string' }, // ej: BE, B2, B3, etc.
+        activa: { bsonType: 'int' }, // 1 = activa, 0 = inactiva
       },
     },
   },
@@ -51,32 +48,63 @@ dbConn.cargos.createIndex({ nombre: 1 }, { unique: true });
 
 // 3) PRODUCTOS
 // ------------
-// Inventario por sede (no por despensa interna)
+// Catálogo de productos y stocks mínimos por sede
 
 dbConn.createCollection('productos', {
   validator: {
     $jsonSchema: {
       bsonType: 'object',
-      required: ['_id', 'nombre', 'categoria', 'unidad', 'stockMinimo', 'cantidadActual', 'sedeId'],
+      required: [
+        '_id',
+        'nombre',
+        'categoria',
+        'unidad',
+        'stockMinBambiEnlace',
+        'stockMinBambiII',
+        'stockMinBambiIII',
+        'stockMinBambiIV',
+        'stockMinBambiV',
+      ],
       properties: {
         _id: { bsonType: 'string' }, // ej: ARROZ
         nombre: { bsonType: 'string' },
         categoria: { bsonType: 'string' },
         unidad: { bsonType: 'string' }, // kg, L, etc.
-        stockMinimo: { bsonType: 'int' },
-        cantidadActual: { bsonType: 'int' },
-        sedeId: { bsonType: 'string' }, // referencia a sedes._id
-        estado: { bsonType: 'string' }, // NORMAL, STOCK_BAJO, etc.
-        creadoEn: { bsonType: ['date', 'null'] },
-        actualizadoEn: { bsonType: ['date', 'null'] },
+        stockMinBambiEnlace: { bsonType: ['double', 'int'] },
+        stockMinBambiII: { bsonType: ['double', 'int'] },
+        stockMinBambiIII: { bsonType: ['double', 'int'] },
+        stockMinBambiIV: { bsonType: ['double', 'int'] },
+        stockMinBambiV: { bsonType: ['double', 'int'] },
       },
     },
   },
 });
 
-dbConn.productos.createIndex({ sedeId: 1, nombre: 1 }, { unique: true });
+dbConn.productos.createIndex({ nombre: 1 }, { unique: true });
 
-// 4) HISTORIAL DE INVENTARIO
+// 4) INVENTARIO POR SEDE
+// -----------------------
+// Estado actual del inventario por sede y producto
+
+dbConn.createCollection('inventario_sedes', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['sedeId', 'productoId', 'cantidadActual', 'estado', 'actualizadoEn'],
+      properties: {
+        sedeId: { bsonType: 'string' }, // referencia a sedes._id
+        productoId: { bsonType: 'string' }, // referencia a productos._id
+        cantidadActual: { bsonType: ['double', 'int'] },
+        estado: { bsonType: 'string' }, // NORMAL, STOCK_BAJO, etc.
+        actualizadoEn: { bsonType: 'date' },
+      },
+    },
+  },
+});
+
+dbConn.inventario_sedes.createIndex({ sedeId: 1, productoId: 1 }, { unique: true });
+
+// 5) HISTORIAL DE INVENTARIO
 // ---------------------------
 // Movimientos de entrada / salida / transferencia de productos
 
@@ -90,7 +118,7 @@ dbConn.createCollection('inventario_historial', {
         tipo: { bsonType: 'string' }, // entrada, salida, transferencia
         productoId: { bsonType: 'string' }, // referencia a productos._id
         sedeId: { bsonType: 'string' }, // sede que registra el movimiento
-        cantidad: { bsonType: 'int' },
+        cantidad: { bsonType: 'double' },
         sedeOrigenId: { bsonType: ['string', 'null'] },
         sedeDestinoId: { bsonType: ['string', 'null'] },
         motivo: { bsonType: ['string', 'null'] },
@@ -103,7 +131,7 @@ dbConn.createCollection('inventario_historial', {
 dbConn.inventario_historial.createIndex({ sedeId: 1, fecha: -1 });
 dbConn.inventario_historial.createIndex({ productoId: 1, fecha: -1 });
 
-// 5) HISTORIAL DE PLATOS SERVIDOS
+// 6) HISTORIAL DE PLATOS SERVIDOS
 // -------------------------------
 // Registros de la sección "Platos Servidos"
 

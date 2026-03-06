@@ -1,5 +1,5 @@
-class Casa {
-  Casa({
+class Sede {
+  Sede({
     required this.id,
     required this.nombre,
     required this.codigo,
@@ -8,12 +8,12 @@ class Casa {
   final String id;
   final String nombre;
   final String codigo;
-}
 
-final List<Casa> casas = [
-  Casa(id: '1', nombre: 'Casa Principal', codigo: 'CP'),
-  Casa(id: '2', nombre: 'Casa Ángeles', codigo: 'CA'),
-  Casa(id: '3', nombre: 'Casa Esperanza', codigo: 'CE'),
-  Casa(id: '4', nombre: 'Casa Estrellas', codigo: 'CES'),
-  Casa(id: '5', nombre: 'Casa Sueños', codigo: 'CS'),
-];
+  factory Sede.fromJson(Map<String, dynamic> json) {
+    return Sede(
+      id: json['id'] as String,
+      nombre: json['nombre'] as String,
+      codigo: json['codigo'] as String? ?? '',
+    );
+  }
+}

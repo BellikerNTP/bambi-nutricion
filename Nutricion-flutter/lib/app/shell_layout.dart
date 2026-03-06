@@ -19,25 +19,14 @@ class ShellLayout extends StatelessWidget {
             onDestinationSelected: (index) {
               switch (index) {
                 case 0:
-                  context.go('/dashboard');
-                  break;
-                case 1:
                   context.go('/inventario');
                   break;
-                case 2:
+                case 1:
                   context.go('/platos-servidos');
-                  break;
-                case 3:
-                  context.go('/reportes');
                   break;
               }
             },
             destinations: const [
-              NavigationRailDestination(
-                icon: Icon(Icons.dashboard_outlined),
-                selectedIcon: Icon(Icons.dashboard),
-                label: Text('Dashboard'),
-              ),
               NavigationRailDestination(
                 icon: Icon(Icons.inventory_2_outlined),
                 selectedIcon: Icon(Icons.inventory_2),
@@ -47,11 +36,6 @@ class ShellLayout extends StatelessWidget {
                 icon: Icon(Icons.restaurant_menu_outlined),
                 selectedIcon: Icon(Icons.restaurant_menu),
                 label: Text('Platos Servidos'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.bar_chart_outlined),
-                selectedIcon: Icon(Icons.bar_chart),
-                label: Text('Reportes'),
               ),
             ],
           ),
@@ -77,9 +61,7 @@ class ShellLayout extends StatelessWidget {
   }
 
   int _indexForLocation(String location) {
-    if (location.startsWith('/inventario')) return 1;
-    if (location.startsWith('/platos-servidos')) return 2;
-    if (location.startsWith('/reportes')) return 3;
+    if (location.startsWith('/platos-servidos')) return 1;
     return 0;
   }
 }
