@@ -60,33 +60,27 @@ Esto creará la estructura de colecciones y algunos datos de ejemplo.
    cd backend
    ```
 
-2. (Recomendado) Crea y activa un entorno virtual de Python, por ejemplo:
 
-   ```bash
-   python -m venv .venv
-   .venv\Scripts\activate
-   ```
-
-3. Instala las dependencias de Python:
+2. Instala las dependencias de Python:
 
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Crea un archivo `.env` dentro de `backend/` con este contenido (ajusta el URI a tu cluster):
+3. Crea un archivo `.env` dentro de `backend/` con este contenido (ajusta el URI a tu cluster):
 
    ```env
    MONGODB_URI=mongodb+srv://usuario:password@tu-cluster.mongodb.net
    MONGODB_DB=nutricion_hogar_bambi
    ```
 
-5. Levanta el servidor FastAPI con Uvicorn:
+4. Levanta el servidor FastAPI con Uvicorn:
 
    ```bash
    uvicorn main:app --reload --port 8000
    ```
 
-6. Verifica que responde:
+5. Verifica que responde:
 
    - Abre en el navegador: `http://localhost:8000/health` → debe devolver `{ "status": "ok" }`.
    - La documentación interactiva de la API está en `http://localhost:8000/docs`.
