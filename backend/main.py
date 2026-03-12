@@ -96,6 +96,51 @@ class RegistroPlatoOut(BaseModel):
     observaciones: Optional[str] = None
 
 
+class CargoOut(BaseModel):
+    id: str
+    nombre: str
+    tipo: int
+    sedes: List[str]
+    observaciones: Optional[str] = None
+
+
+class CargoBaseIn(BaseModel):
+    nombre: str
+    tipo: int = 1
+    sedes: List[str] = Field(default_factory=list)
+    observaciones: Optional[str] = None
+
+
+class CargoCreateIn(CargoBaseIn):
+    pass
+
+
+class CargoUpdateIn(CargoBaseIn):
+    pass
+
+
+class TipoPlatoOut(BaseModel):
+    id: str
+    nombre: str
+    activo: bool
+
+
+class RegistroCargoComidaIn(BaseModel):
+    cargoId: str
+    cantidadPersonas: int
+
+
+class RegistroComidaIn(BaseModel):
+    fechaRegistro: datetime
+    sedeId: str
+    tipoComidaId: str
+    registros: List[RegistroCargoComidaIn]
+
+
+class RegistroComidaResultado(BaseModel):
+    insertados: int
+
+
 # ---------
 # ENDPOINTS
 # ---------
@@ -133,6 +178,114 @@ def listar_sedes(activa: Optional[bool] = Query(None, alias="activa")):
         )
 
     return resultados
+
+
+@app.get("/tipos-platos", response_model=List[TipoPlatoOut])
+def listar_tipos_platos() -> List[TipoPlatoOut]:
+    tipos_col = get_collection("tipos_platos")
+
+    docs = list(tipos_col.find({}).sort("nombre", 1))
+
+    resultados: List[dict[str, Any]] = []
+    for d in docs:
+        activo_val = d.get("activo", 1)
+        resultados.append(
+            {
+                "id": d.get("_id", ""),
+                "nombre": d.get("nombre", ""),
+                "activo": bool(activo_val),
+            }
+        )
+
+    return resultados
+
+
+@app.get("/cargos", response_model=List[CargoOut])
+def listar_cargos() -> List[CargoOut]:
+    cargos_col = get_collection("cargos")
+
+    # Solo devolver cargos activos (tipo != 0)
+    docs = list(cargos_col.find({"tipo": {"$ne": 0}}).sort("nombre", 1))
+
+    resultados: List[dict[str, Any]] = []
+    for d in docs:
+        sedes = d.get("sedes") or []
+        if not isinstance(sedes, list):
+            sedes = [sedes]
+
+        resultados.append(
+            {
+                "id": d.get("_id", ""),
+                "nombre": d.get("nombre", ""),
+                "tipo": int(d.get("tipo", 0)),
+                "sedes": [str(s) for s in sedes],
+                "observaciones": d.get("observaciones"),
+            }
+        )
+
+    return resultados
+
+
+@app.post("/cargos", response_model=CargoOut)
+def crear_cargo(payload: CargoCreateIn) -> CargoOut:
+    cargos_col = get_collection("cargos")
+
+    # ID derivado del nombre: mayúsculas y espacios como "_"
+    nombre_limpio = " ".join(payload.nombre.strip().split())
+    cargo_id = nombre_limpio.upper().replace(" ", "_")
+
+    existente = cargos_col.find_one({"_id": cargo_id})
+    if existente:
+        raise HTTPException(status_code=400, detail="Ya existe un cargo con ese nombre")
+
+    doc = {
+        "_id": cargo_id,
+        "nombre": payload.nombre,
+        "tipo": payload.tipo,
+        "sedes": payload.sedes,
+        "observaciones": payload.observaciones,
+    }
+
+    cargos_col.insert_one(doc)
+
+    return CargoOut(
+        id=cargo_id,
+        nombre=payload.nombre,
+        tipo=payload.tipo,
+        sedes=payload.sedes,
+        observaciones=payload.observaciones,
+    )
+
+
+@app.put("/cargos/{cargo_id}", response_model=CargoOut)
+def actualizar_cargo(cargo_id: str, payload: CargoUpdateIn) -> CargoOut:
+    cargos_col = get_collection("cargos")
+
+    update_doc = {
+        "nombre": payload.nombre,
+        "tipo": payload.tipo,
+        "sedes": payload.sedes,
+        "observaciones": payload.observaciones,
+    }
+
+    result = cargos_col.update_one({"_id": cargo_id}, {"$set": update_doc})
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Cargo no encontrado")
+
+    doc = cargos_col.find_one({"_id": cargo_id}) or update_doc
+
+    sedes = doc.get("sedes") or []
+    if not isinstance(sedes, list):
+        sedes = [sedes]
+
+    return CargoOut(
+        id=cargo_id,
+        nombre=doc.get("nombre", payload.nombre),
+        tipo=int(doc.get("tipo", payload.tipo)),
+        sedes=[str(s) for s in sedes],
+        observaciones=doc.get("observaciones", payload.observaciones),
+    )
 
 
 # INVENTARIO
@@ -630,3 +783,65 @@ def registrar_plato(payload: RegistroPlatoIn):
         cantidadPersonas=payload.cantidadPersonas,
         observaciones=payload.observaciones,
     )
+
+
+@app.post("/platos/registrar-comida", response_model=RegistroComidaResultado)
+def registrar_comida_por_cargos(payload: RegistroComidaIn) -> RegistroComidaResultado:
+    """Registra en platos_historial la cantidad de personas que comieron por cargo.
+
+    Crea un documento por cada cargo con cantidadPersonas > 0.
+    - fechaRegistro: fecha indicada por el usuario (día del servicio).
+    - creadoEl: fecha/hora actual del sistema.
+    - registradoEl: misma fecha que fechaRegistro para trazabilidad.
+    """
+
+    if not payload.registros:
+        raise HTTPException(status_code=400, detail="Debe incluir al menos un cargo")
+
+    registros_validos = [
+        r for r in payload.registros if r.cantidadPersonas and r.cantidadPersonas > 0
+    ]
+    if not registros_validos:
+        raise HTTPException(
+            status_code=400,
+            detail="Debe haber al menos un cargo con cantidad de personas mayor a 0",
+        )
+
+    platos_col = get_collection("platos_historial")
+    tipos_col = get_collection("tipos_platos")
+
+    # Validar que el tipo de plato exista
+    tipo = tipos_col.find_one({"_id": payload.tipoComidaId})
+    if not tipo:
+        raise HTTPException(status_code=400, detail="Tipo de comida no válido")
+
+    fecha_registro = payload.fechaRegistro
+    ahora = datetime.utcnow()
+
+    documentos: List[Dict[str, Any]] = []
+    for r in registros_validos:
+        if r.cantidadPersonas <= 0:
+            continue
+
+        documentos.append(
+            {
+                "fecha": fecha_registro,
+                "sedeId": payload.sedeId,
+                "tipoComida": payload.tipoComidaId,
+                "cargoId": r.cargoId,
+                "cantidadPersonas": int(r.cantidadPersonas),
+                "observaciones": None,
+                "registradoEl": fecha_registro,
+                "creadoEl": ahora,
+            }
+        )
+
+    if not documentos:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay registros válidos para guardar",
+        )
+
+    result = platos_col.insert_many(documentos)
+
+    return RegistroComidaResultado(insertados=len(result.inserted_ids))
