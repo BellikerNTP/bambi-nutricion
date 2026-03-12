@@ -67,7 +67,6 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
         PageHeader(
           title: 'Platos Servidos',
           description: 'Configuración de cargos contados por sede',
-          selectedSede: widget.selectedSede,
           actions: Wrap(
             spacing: 8,
             children: [

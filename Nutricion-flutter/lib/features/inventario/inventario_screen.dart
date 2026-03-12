@@ -9,10 +9,12 @@ class InventarioScreen extends StatefulWidget {
     super.key,
     required this.selectedSede,
     required this.sedes,
+    required this.onSedeChange,
   });
 
   final Sede selectedSede;
   final List<Sede> sedes;
+  final ValueChanged<Sede> onSedeChange;
 
   @override
   State<InventarioScreen> createState() => _InventarioScreenState();
@@ -164,6 +166,39 @@ class _InventarioScreenState extends State<InventarioScreen>
             ),
             icon: const Icon(Icons.add),
             label: const Text('Nueva Transacción'),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: SizedBox(
+              width: 260,
+              child: DropdownButtonFormField<String>(
+                value: widget.selectedSede.id,
+                decoration: const InputDecoration(
+                  labelText: 'Sede del inventario',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: [
+                  for (final sede in widget.sedes)
+                    DropdownMenuItem<String>(
+                      value: sede.id,
+                      child: Text(sede.nombre),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  if (widget.sedes.isEmpty) return;
+                  final sede = widget.sedes.firstWhere(
+                    (s) => s.id == value,
+                    orElse: () => widget.sedes.first,
+                  );
+                  widget.onSedeChange(sede);
+                },
+              ),
+            ),
           ),
         ),
         Expanded(

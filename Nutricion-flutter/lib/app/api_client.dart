@@ -20,6 +20,27 @@ class ApiClient {
   /// Cambia esta URL si corres el backend en otra máquina o puerto.
   static const String baseUrl = 'http://localhost:8000';
 
+  Future<Map<String, dynamic>> getJsonObject(String path,
+      {Map<String, String>? query}) async {
+    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
+    final resp = await _client.get(uri);
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      throw Exception('Respuesta inesperada (se esperaba objeto)');
+    }
+
+    String message = 'Error ${resp.statusCode} al llamar $path';
+    try {
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map<String, dynamic> && decoded['detail'] != null) {
+        message = decoded['detail'].toString();
+      }
+    } catch (_) {}
+
+    throw ApiException(message);
+  }
+
   Future<List<dynamic>> getJsonList(String path,
       {Map<String, String>? query}) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);

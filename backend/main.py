@@ -141,6 +141,49 @@ class RegistroComidaResultado(BaseModel):
     insertados: int
 
 
+class CategoriaPlatosSede(BaseModel):
+    sedeId: str
+    cantidad: int
+
+
+class CategoriaPlatosResumen(BaseModel):
+    codigo: str
+    nombre: str
+    total: int
+    porSede: List[CategoriaPlatosSede]
+
+
+class ResumenPlatosServidosOut(BaseModel):
+    desde: datetime
+    hasta: datetime
+    categorias: List[CategoriaPlatosResumen]
+
+
+class TipoPlatoSedeResumen(BaseModel):
+    sedeId: str
+    cantidad: int
+
+
+class TipoPlatoResumen(BaseModel):
+    codigo: str
+    nombre: str
+    total: int
+    porSede: List[TipoPlatoSedeResumen]
+
+
+class TotalPlatosPorSede(BaseModel):
+    sedeId: str
+    cantidad: int
+
+
+class ResumenPlatosPorTipoOut(BaseModel):
+    desde: datetime
+    hasta: datetime
+    tipos: List[TipoPlatoResumen]
+    totalGeneral: int
+    totalPorSede: List[TotalPlatosPorSede]
+
+
 # ---------
 # ENDPOINTS
 # ---------
@@ -845,3 +888,202 @@ def registrar_comida_por_cargos(payload: RegistroComidaIn) -> RegistroComidaResu
     result = platos_col.insert_many(documentos)
 
     return RegistroComidaResultado(insertados=len(result.inserted_ids))
+
+
+def _categoria_para_cargo(cargo_id: str, tipo: int | None) -> tuple[Optional[str], Optional[str]]:
+    """Devuelve (codigo, nombre) de categoría para un cargo.
+
+    - NNA -> Niños
+    - IDs que comienzan por "TIAS" -> Tías
+    - tipo == 2 -> Adultos importantes
+    - tipo == 1 -> Adultos secundarios
+    """
+
+    if cargo_id == "NNA":
+        return "NINOS", "Niños"
+    if cargo_id.startswith("TIAS"):
+        return "TIAS", "Tías"
+    if tipo == 2:
+        return "ADULTOS_IMPORTANTES", "Adultos importantes"
+    if tipo == 1:
+        return "ADULTOS_SECUNDARIOS", "Adultos secundarios"
+    return None, None
+
+
+@app.get("/reportes/platos-servidos", response_model=ResumenPlatosServidosOut)
+def resumen_platos_servidos(
+    desde: datetime = Query(..., alias="desde"),
+    hasta: datetime = Query(..., alias="hasta"),
+) -> ResumenPlatosServidosOut:
+    """Resumen de platos servidos por categoría y por sede en un rango de fechas."""
+
+    if hasta < desde:
+        raise HTTPException(status_code=400, detail="La fecha 'hasta' no puede ser menor que 'desde'")
+
+    platos_col = get_collection("platos_historial")
+    cargos_col = get_collection("cargos")
+
+    # Mapa de cargos para conocer su tipo
+    cargos_docs = list(cargos_col.find({}))
+    cargos_info: dict[str, int] = {}
+    for c in cargos_docs:
+        cid = c.get("_id")
+        if not cid:
+            continue
+        try:
+            cargos_info[str(cid)] = int(c.get("tipo", 1))
+        except (TypeError, ValueError):
+            cargos_info[str(cid)] = 1
+
+    # Inicializar acumuladores
+    totales: dict[str, int] = {
+        "NINOS": 0,
+        "TIAS": 0,
+        "ADULTOS_IMPORTANTES": 0,
+        "ADULTOS_SECUNDARIOS": 0,
+    }
+    por_sede: dict[str, dict[str, int]] = {
+        "NINOS": {},
+        "TIAS": {},
+        "ADULTOS_IMPORTANTES": {},
+        "ADULTOS_SECUNDARIOS": {},
+    }
+
+    # Buscar registros de platos en el rango
+    docs = list(
+        platos_col.find({"fecha": {"$gte": desde, "$lte": hasta}})
+    )
+
+    for d in docs:
+        cargo_id = str(d.get("cargoId", ""))
+        sede_id = str(d.get("sedeId", ""))
+        try:
+            cantidad = int(d.get("cantidadPersonas", 0))
+        except (TypeError, ValueError):
+            continue
+        if not cargo_id or not sede_id or cantidad <= 0:
+            continue
+
+        tipo_cargo = cargos_info.get(cargo_id)
+        codigo_cat, _ = _categoria_para_cargo(cargo_id, tipo_cargo)
+        if not codigo_cat:
+            continue
+
+        totales[codigo_cat] = totales.get(codigo_cat, 0) + cantidad
+        sede_map = por_sede.setdefault(codigo_cat, {})
+        sede_map[sede_id] = sede_map.get(sede_id, 0) + cantidad
+
+    categorias: List[CategoriaPlatosResumen] = []
+
+    definiciones = [
+        ("NINOS", "Niños"),
+        ("TIAS", "Tías"),
+        ("ADULTOS_IMPORTANTES", "Adultos importantes"),
+        ("ADULTOS_SECUNDARIOS", "Adultos secundarios"),
+    ]
+
+    for codigo, nombre in definiciones:
+        sede_map = por_sede.get(codigo, {})
+        categorias.append(
+            CategoriaPlatosResumen(
+                codigo=codigo,
+                nombre=nombre,
+                total=int(totales.get(codigo, 0)),
+                porSede=[
+                    CategoriaPlatosSede(sedeId=sid, cantidad=int(cant))
+                    for sid, cant in sede_map.items()
+                ],
+            )
+        )
+
+    return ResumenPlatosServidosOut(desde=desde, hasta=hasta, categorias=categorias)
+
+
+@app.get("/reportes/platos-por-tipo", response_model=ResumenPlatosPorTipoOut)
+def resumen_platos_por_tipo(
+    desde: datetime = Query(..., alias="desde"),
+    hasta: datetime = Query(..., alias="hasta"),
+) -> ResumenPlatosPorTipoOut:
+    """Resumen de platos servidos por tipo de plato y por sede en un rango de fechas.
+
+    - Total por tipo de plato
+    - Total de cada tipo de plato por sede
+    - Total general de platos
+    - Total general por sede
+    """
+
+    if hasta < desde:
+        raise HTTPException(status_code=400, detail="La fecha 'hasta' no puede ser menor que 'desde'")
+
+    platos_col = get_collection("platos_historial")
+    tipos_col = get_collection("tipos_platos")
+
+    # Cargar definiciones de tipos de plato (para nombres legibles)
+    tipos_docs = list(tipos_col.find({}))
+    tipos_nombres: dict[str, str] = {}
+    for t in tipos_docs:
+        tid = t.get("_id")
+        if not tid:
+            continue
+        tipos_nombres[str(tid)] = str(t.get("nombre", tid))
+
+    # Acumuladores por tipo y sede
+    totales_por_tipo: dict[str, int] = {}
+    por_tipo_y_sede: dict[str, dict[str, int]] = {}
+
+    total_general = 0
+    total_por_sede: dict[str, int] = {}
+
+    docs = list(
+        platos_col.find({"fecha": {"$gte": desde, "$lte": hasta}})
+    )
+
+    for d in docs:
+        tipo_id = str(d.get("tipoComida", ""))
+        sede_id = str(d.get("sedeId", ""))
+        try:
+            cantidad = int(d.get("cantidadPersonas", 0))
+        except (TypeError, ValueError):
+            continue
+
+        if not tipo_id or not sede_id or cantidad <= 0:
+            continue
+
+        totales_por_tipo[tipo_id] = totales_por_tipo.get(tipo_id, 0) + cantidad
+
+        sede_map = por_tipo_y_sede.setdefault(tipo_id, {})
+        sede_map[sede_id] = sede_map.get(sede_id, 0) + cantidad
+
+        total_general += cantidad
+        total_por_sede[sede_id] = total_por_sede.get(sede_id, 0) + cantidad
+
+    tipos_resumen: List[TipoPlatoResumen] = []
+
+    # Mantener un orden consistente por nombre de tipo de plato
+    for tipo_id in sorted(totales_por_tipo.keys(), key=lambda k: tipos_nombres.get(k, k)):
+        nombre = tipos_nombres.get(tipo_id, tipo_id)
+        sede_map = por_tipo_y_sede.get(tipo_id, {})
+        tipos_resumen.append(
+            TipoPlatoResumen(
+                codigo=tipo_id,
+                nombre=nombre,
+                total=int(totales_por_tipo.get(tipo_id, 0)),
+                porSede=[
+                    TipoPlatoSedeResumen(sedeId=sid, cantidad=int(cant))
+                    for sid, cant in sede_map.items()
+                ],
+            )
+        )
+
+    total_por_sede_list = [
+        TotalPlatosPorSede(sedeId=sid, cantidad=int(cant))
+        for sid, cant in total_por_sede.items()
+    ]
+
+    return ResumenPlatosPorTipoOut(
+        desde=desde,
+        hasta=hasta,
+        tipos=tipos_resumen,
+        totalGeneral=int(total_general),
+        totalPorSede=total_por_sede_list,
+    )

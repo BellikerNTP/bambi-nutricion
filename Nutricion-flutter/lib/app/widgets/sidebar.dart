@@ -1,24 +1,16 @@
 import 'package:flutter/material.dart';
 
-import '../models.dart';
-
-enum ViewType { platos, inventario }
+enum ViewType { platos, inventario, reportes }
 
 class Sidebar extends StatelessWidget {
   const Sidebar({
     super.key,
     required this.currentView,
     required this.onViewChange,
-    required this.sedes,
-    required this.selectedSede,
-    required this.onSedeChange,
   });
 
   final ViewType currentView;
   final ValueChanged<ViewType> onViewChange;
-  final List<Sede> sedes;
-  final Sede selectedSede;
-  final ValueChanged<Sede> onSedeChange;
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +37,6 @@ class Sidebar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildHeader(),
-          _buildSedeSelector(),
           Expanded(child: _buildMenu()),
           _buildFooter(),
         ],
@@ -85,62 +76,6 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  Widget _buildSedeSelector() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      decoration: const BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Color(0xFF15803D)),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Sede Actual',
-            style: TextStyle(
-              color: Color(0xFFA7F3D0),
-              fontSize: 11,
-              letterSpacing: 0.8,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF16A34A),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: selectedSede.id,
-                iconEnabledColor: Colors.white,
-                dropdownColor: const Color(0xFF166534),
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-                onChanged: (value) {
-                  if (value == null) return;
-                  if (sedes.isEmpty) return;
-                  final sede = sedes.firstWhere(
-                    (s) => s.id == value,
-                    orElse: () => sedes.first,
-                  );
-                  onSedeChange(sede);
-                },
-                items: [
-                  for (final sede in sedes)
-                    DropdownMenuItem(
-                      value: sede.id,
-                      child: Text(sede.nombre),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildMenu() {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -156,6 +91,12 @@ class Sidebar extends StatelessWidget {
           icon: Icons.inventory_2_outlined,
           isActive: currentView == ViewType.inventario,
           onTap: () => onViewChange(ViewType.inventario),
+        ),
+        _SidebarItem(
+          label: 'Reportes',
+          icon: Icons.bar_chart_outlined,
+          isActive: currentView == ViewType.reportes,
+          onTap: () => onViewChange(ViewType.reportes),
         ),
       ],
     );

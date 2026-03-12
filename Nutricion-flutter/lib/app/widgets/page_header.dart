@@ -7,13 +7,13 @@ class PageHeader extends StatelessWidget {
     super.key,
     required this.title,
     this.description,
-    required this.selectedSede,
+    this.selectedSede,
     this.actions,
   });
 
   final String title;
   final String? description;
-  final Sede selectedSede;
+  final Sede? selectedSede;
   final Widget? actions;
 
   @override
@@ -39,22 +39,25 @@ class PageHeader extends StatelessWidget {
                             color: Colors.grey.shade900,
                           ),
                     ),
-                    const SizedBox(width: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade100,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        selectedSede.nombre,
-                        style: TextStyle(
-                          color: Colors.green.shade700,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
+                    if (selectedSede != null) ...[
+                      const SizedBox(width: 12),
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade100,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          selectedSede!.nombre,
+                          style: TextStyle(
+                            color: Colors.green.shade700,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
                 if (description != null) ...[

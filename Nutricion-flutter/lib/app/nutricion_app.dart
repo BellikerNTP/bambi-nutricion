@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../features/inventario/inventario_screen.dart';
 import '../features/platos_servidos/platos_servidos_screen.dart';
+import '../features/reportes/reportes_screen.dart';
 import 'models.dart';
 import 'widgets/sidebar.dart';
 import 'api_client.dart';
@@ -99,13 +100,6 @@ class _NutricionHomeState extends State<_NutricionHome> {
                 _currentView = view;
               });
             },
-            sedes: _sedes,
-            selectedSede: _selectedSede!,
-            onSedeChange: (sede) {
-              setState(() {
-                _selectedSede = sede;
-              });
-            },
           ),
           Expanded(
             child: _buildView(),
@@ -123,7 +117,14 @@ class _NutricionHomeState extends State<_NutricionHome> {
         return InventarioScreen(
           selectedSede: _selectedSede!,
           sedes: _sedes,
+          onSedeChange: (sede) {
+            setState(() {
+              _selectedSede = sede;
+            });
+          },
         );
+      case ViewType.reportes:
+        return ReportesScreen(selectedSede: _selectedSede!);
     }
   }
 }
