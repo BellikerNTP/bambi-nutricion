@@ -37,8 +37,12 @@ dbConn.createCollection('cargos', {
       properties: {
         _id: { bsonType: 'string' }, // ej: NINOS
         nombre: { bsonType: 'string' },
-        descripcion: { bsonType: ['string', 'null'] },
-        creadoEn: { bsonType: ['date', 'null'] },
+        tipo: { bsonType: 'int' }, // 2 = importante, 1 = secundario, 0 = desactivado
+        sedes: {
+          bsonType: 'array',
+          items: { bsonType: 'string' }, // lista de IDs de sedes
+        },
+        observaciones: { bsonType: ['string', 'null'] },
       },
     },
   },
@@ -139,17 +143,15 @@ dbConn.createCollection('platos_historial', {
   validator: {
     $jsonSchema: {
       bsonType: 'object',
-      required: ['fecha', 'sedeId', 'tipoComida', 'cargoId', 'nombrePlato', 'cantidadPersonas'],
+      required: ['fecha', 'sedeId', 'tipoComida', 'cargoId', 'cantidadPersonas'],
       properties: {
-        fecha: { bsonType: 'date' },
         sedeId: { bsonType: 'string' }, // referencia a sedes._id
         tipoComida: { bsonType: 'string' }, // DESAYUNO, ALMUERZO, etc.
         cargoId: { bsonType: 'string' }, // referencia a cargos._id
-        nombrePlato: { bsonType: 'string' },
-        ingredientes: { bsonType: ['string', 'null'] },
-        cantidadPersonas: { bsonType: 'int' },
+        cantidadPersonas: { bsonType: 'int' }, // por cargo
         observaciones: { bsonType: ['string', 'null'] },
-        creadoEn: { bsonType: ['date', 'null'] },
+        registradoEl: { bsonType: 'date' },
+        creadoEl: { bsonType: 'date' },
       },
     },
   },
@@ -158,5 +160,25 @@ dbConn.createCollection('platos_historial', {
 dbConn.platos_historial.createIndex({ sedeId: 1, fecha: -1 });
 dbConn.platos_historial.createIndex({ cargoId: 1, fecha: -1 });
 dbConn.platos_historial.createIndex({ tipoComida: 1, fecha: -1 });
+
+// 7) TIPOS DE PLATOS
+// ------------------
+// Catálogo de tipos de comidas: desayuno, merienda, almuerzo, cena.
+
+dbConn.createCollection('tipos_platos', {
+  validator: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['_id', 'nombre'],
+      properties: {
+        _id: { bsonType: 'string' }, // ej: DESAYUNO
+        nombre: { bsonType: 'string' }, // ej: Desayuno
+        activo: { bsonType: 'int' }, // 1 = activo, 0 = oculto
+      },
+    },
+  },
+});
+
+dbConn.tipos_platos.createIndex({ nombre: 1 }, { unique: true });
 
 print('Colecciones creadas y configuradas en DB ' + dbName);
