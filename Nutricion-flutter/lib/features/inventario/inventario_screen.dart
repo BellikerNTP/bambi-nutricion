@@ -151,7 +151,8 @@ class _InventarioScreenState extends State<InventarioScreen>
       final term = _searchTerm.toLowerCase();
       return p.nombre.toLowerCase().contains(term) ||
           p.categoria.toLowerCase().contains(term);
-    }).toList(growable: false);
+    }).toList()
+      ..sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
 
     return Column(
       children: [
@@ -244,21 +245,34 @@ class _InventarioScreenState extends State<InventarioScreen>
                           ),
                         ],
                       ),
-                      SizedBox(
-                        width: 260,
-                        child: TextField(
-                          decoration: const InputDecoration(
-                            prefixIcon: Icon(Icons.search),
-                            hintText: 'Buscar producto...',
-                            isDense: true,
-                            border: OutlineInputBorder(),
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 260,
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                prefixIcon: Icon(Icons.search),
+                                hintText: 'Buscar producto...',
+                                isDense: true,
+                                border: OutlineInputBorder(),
+                              ),
+                              onChanged: (value) {
+                                setState(() {
+                                  _searchTerm = value;
+                                });
+                              },
+                            ),
                           ),
-                          onChanged: (value) {
-                            setState(() {
-                              _searchTerm = value;
-                            });
-                          },
-                        ),
+                          const SizedBox(width: 12),
+                          FilledButton.icon(
+                            onPressed: _openNuevoProducto,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Colors.green.shade600,
+                            ),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Nuevo producto'),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -284,7 +298,11 @@ class _InventarioScreenState extends State<InventarioScreen>
                     child: TabBarView(
                       controller: _tabController,
                       children: [
-                        _InventarioTable(productos: filtered),
+                      _InventarioTable(
+                        productos: filtered,
+                        sedeId: widget.selectedSede.id,
+                        onProductoActualizado: _cargarDatosIniciales,
+                      ),
                         _TransaccionesList(transacciones: _transacciones),
                       ],
                     ),
@@ -311,6 +329,19 @@ class _InventarioScreenState extends State<InventarioScreen>
           sedeId: sedeId,
           sedesDestino: sedesDestino,
           onSaved: _cargarDatosIniciales,
+        );
+      },
+    );
+  }
+
+  void _openNuevoProducto() {
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return _DialogoNuevoProducto(
+          apiClient: _apiClient,
+          sedeId: widget.selectedSede.id,
+          onGuardado: _cargarDatosIniciales,
         );
       },
     );
@@ -626,10 +657,38 @@ ignore: prefer_const_constructors
   }
 }
 
-class _InventarioTable extends StatelessWidget {
-  const _InventarioTable({required this.productos});
+class _InventarioTable extends StatefulWidget {
+  const _InventarioTable({
+    required this.productos,
+    required this.sedeId,
+    required this.onProductoActualizado,
+  });
 
   final List<_Producto> productos;
+  final String sedeId;
+  final VoidCallback onProductoActualizado;
+
+  @override
+  State<_InventarioTable> createState() => _InventarioTableState();
+}
+
+class _InventarioTableState extends State<_InventarioTable> {
+  final ApiClient _apiClient = ApiClient();
+
+  Future<void> _abrirDialogoModificar(BuildContext context, _Producto producto) async {
+    showDialog(
+      context: context,
+      builder: (ctx) => _DialogoModificarProducto(
+        producto: producto,
+        sedeId: widget.sedeId,
+        apiClient: _apiClient,
+        onGuardar: () {
+          Navigator.pop(ctx);
+          widget.onProductoActualizado();
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -644,9 +703,10 @@ class _InventarioTable extends StatelessWidget {
             DataColumn(label: Text('Cantidad')),
             DataColumn(label: Text('Stock mínimo')),
             DataColumn(label: Text('Estado')),
+            DataColumn(label: Text('Acciones')),
           ],
           rows: [
-            for (final p in productos)
+            for (final p in widget.productos)
               DataRow(
                 cells: [
                   DataCell(Text(p.nombre)),
@@ -654,9 +714,272 @@ class _InventarioTable extends StatelessWidget {
                   DataCell(Text('${p.cantidad} ${p.unidad}')),
                   DataCell(Text('${p.stockMinimo} ${p.unidad}')),
                   DataCell(_EstadoChip(estado: p.estado)),
+                  DataCell(
+                    OutlinedButton.icon(
+                      onPressed: () => _abrirDialogoModificar(context, p),
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      label: const Text('Modificar'),
+                    ),
+                  ),
                 ],
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DialogoModificarProducto extends StatefulWidget {
+  const _DialogoModificarProducto({
+    required this.producto,
+    required this.sedeId,
+    required this.apiClient,
+    required this.onGuardar,
+  });
+
+  final _Producto producto;
+  final String sedeId;
+  final ApiClient apiClient;
+  final VoidCallback onGuardar;
+
+  @override
+  State<_DialogoModificarProducto> createState() => _DialogoModificarProductoState();
+}
+
+class _DialogoModificarProductoState extends State<_DialogoModificarProducto> {
+  late TextEditingController _nombreCtrl;
+  late TextEditingController _categoriaCtrl;
+  late TextEditingController _unidadCtrl;
+  late TextEditingController _stockEnlaceCtrl;
+  late TextEditingController _stockIICtrl;
+  late TextEditingController _stockIIICtrl;
+  late TextEditingController _stockIVCtrl;
+  late TextEditingController _stockVCtrl;
+
+  bool _guardando = false;
+  bool _cargando = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _nombreCtrl = TextEditingController(text: widget.producto.nombre);
+    _categoriaCtrl = TextEditingController(text: widget.producto.categoria);
+    _unidadCtrl = TextEditingController(text: widget.producto.unidad);
+    _stockEnlaceCtrl = TextEditingController();
+    _stockIICtrl = TextEditingController();
+    _stockIIICtrl = TextEditingController();
+    _stockIVCtrl = TextEditingController();
+    _stockVCtrl = TextEditingController();
+    _cargarDetallesProducto();
+  }
+
+  Future<void> _cargarDetallesProducto() async {
+    try {
+      final detalle = await widget.apiClient.getJsonObject(
+        '/inventario/productos/${widget.producto.id}',
+      );
+
+      if (mounted) {
+        setState(() {
+          _stockEnlaceCtrl.text = '${detalle['stockMinBambiEnlace'] ?? 0}';
+          _stockIICtrl.text = '${detalle['stockMinBambiII'] ?? 0}';
+          _stockIIICtrl.text = '${detalle['stockMinBambiIII'] ?? 0}';
+          _stockIVCtrl.text = '${detalle['stockMinBambiIV'] ?? 0}';
+          _stockVCtrl.text = '${detalle['stockMinBambiV'] ?? 0}';
+          _cargando = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Error al cargar detalles: $e';
+          _cargando = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _categoriaCtrl.dispose();
+    _unidadCtrl.dispose();
+    _stockEnlaceCtrl.dispose();
+    _stockIICtrl.dispose();
+    _stockIIICtrl.dispose();
+    _stockIVCtrl.dispose();
+    _stockVCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardarCambios() async {
+    setState(() {
+      _guardando = true;
+      _error = null;
+    });
+
+    try {
+      final payload = <String, dynamic>{
+        'nombre': _nombreCtrl.text,
+        'categoria': _categoriaCtrl.text,
+        'unidad': _unidadCtrl.text,
+        'stockMinBambiEnlace': double.tryParse(_stockEnlaceCtrl.text) ?? 0,
+        'stockMinBambiII': double.tryParse(_stockIICtrl.text) ?? 0,
+        'stockMinBambiIII': double.tryParse(_stockIIICtrl.text) ?? 0,
+        'stockMinBambiIV': double.tryParse(_stockIVCtrl.text) ?? 0,
+        'stockMinBambiV': double.tryParse(_stockVCtrl.text) ?? 0,
+      };
+
+      await widget.apiClient.putJson(
+        '/inventario/productos/${widget.producto.id}',
+        payload,
+        query: {'sedeId': widget.sedeId},
+      );
+
+      if (mounted) {
+        widget.onGuardar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Producto actualizado correctamente')),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Error al guardar: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _guardando = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Modificar producto',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _nombreCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre del producto',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _categoriaCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Categoría',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _unidadCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Unidad',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Stock mínimo por sede',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 12),
+              if (_cargando)
+                const Center(child: CircularProgressIndicator())
+              else ...[
+                TextField(
+                  controller: _stockEnlaceCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Stock mínimo - Bambi Enlace',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _stockIICtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Stock mínimo - Bambi II',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _stockIIICtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Stock mínimo - Bambi III',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _stockIVCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Stock mínimo - Bambi IV',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _stockVCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Stock mínimo - Bambi V',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  style: const TextStyle(color: Colors.red),
+                ),
+              ],
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  OutlinedButton(
+                    onPressed: _guardando ? null : () => Navigator.pop(context),
+                    child: const Text('Cancelar'),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton(
+                    onPressed: _guardando ? null : _guardarCambios,
+                    child: _guardando
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Guardar cambios'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -696,6 +1019,236 @@ class _EstadoChip extends StatelessWidget {
           fontSize: 11,
           fontWeight: FontWeight.w600,
           color: textColor,
+        ),
+      ),
+    );
+  }
+}
+
+class _DialogoNuevoProducto extends StatefulWidget {
+  const _DialogoNuevoProducto({
+    required this.apiClient,
+    required this.sedeId,
+    required this.onGuardado,
+  });
+
+  final ApiClient apiClient;
+  final String sedeId;
+  final VoidCallback onGuardado;
+
+  @override
+  State<_DialogoNuevoProducto> createState() => _DialogoNuevoProductoState();
+}
+
+class _DialogoNuevoProductoState extends State<_DialogoNuevoProducto> {
+  late TextEditingController _nombreCtrl;
+  late TextEditingController _categoriaCtrl;
+  late TextEditingController _unidadCtrl;
+  late TextEditingController _stockEnlaceCtrl;
+  late TextEditingController _stockIICtrl;
+  late TextEditingController _stockIIICtrl;
+  late TextEditingController _stockIVCtrl;
+  late TextEditingController _stockVCtrl;
+
+  bool _guardando = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _nombreCtrl = TextEditingController();
+    _categoriaCtrl = TextEditingController();
+    _unidadCtrl = TextEditingController();
+    _stockEnlaceCtrl = TextEditingController(text: '0');
+    _stockIICtrl = TextEditingController(text: '0');
+    _stockIIICtrl = TextEditingController(text: '0');
+    _stockIVCtrl = TextEditingController(text: '0');
+    _stockVCtrl = TextEditingController(text: '0');
+  }
+
+  @override
+  void dispose() {
+    _nombreCtrl.dispose();
+    _categoriaCtrl.dispose();
+    _unidadCtrl.dispose();
+    _stockEnlaceCtrl.dispose();
+    _stockIICtrl.dispose();
+    _stockIIICtrl.dispose();
+    _stockIVCtrl.dispose();
+    _stockVCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _guardar() async {
+    final nombre = _nombreCtrl.text.trim();
+    final categoria = _categoriaCtrl.text.trim();
+    final unidad = _unidadCtrl.text.trim();
+
+    if (nombre.isEmpty || categoria.isEmpty || unidad.isEmpty) {
+      setState(() {
+        _error = 'Completa nombre, categoría y unidad';
+      });
+      return;
+    }
+
+    setState(() {
+      _guardando = true;
+      _error = null;
+    });
+
+    try {
+      await widget.apiClient.postJson(
+        '/inventario/productos',
+        {
+          'nombre': nombre,
+          'categoria': categoria,
+          'unidad': unidad,
+          'stockMinBambiEnlace': double.tryParse(_stockEnlaceCtrl.text) ?? 0,
+          'stockMinBambiII': double.tryParse(_stockIICtrl.text) ?? 0,
+          'stockMinBambiIII': double.tryParse(_stockIIICtrl.text) ?? 0,
+          'stockMinBambiIV': double.tryParse(_stockIVCtrl.text) ?? 0,
+          'stockMinBambiV': double.tryParse(_stockVCtrl.text) ?? 0,
+        },
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onGuardado();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Producto creado correctamente')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Error al crear: $e';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _guardando = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Nuevo producto',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _nombreCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre del producto (genera ID automático)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _categoriaCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Categoría',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _unidadCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Unidad',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Stock mínimo por sede',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _stockEnlaceCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Stock mínimo - Bambi Enlace',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _stockIICtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Stock mínimo - Bambi II',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _stockIIICtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Stock mínimo - Bambi III',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _stockIVCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Stock mínimo - Bambi IV',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _stockVCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Stock mínimo - Bambi V',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  style: const TextStyle(color: Colors.red),
+                ),
+              ],
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  OutlinedButton(
+                    onPressed: _guardando ? null : () => Navigator.pop(context),
+                    child: const Text('Cancelar'),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton(
+                    onPressed: _guardando ? null : _guardar,
+                    child: _guardando
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Guardar cambios'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
