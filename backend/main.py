@@ -8,6 +8,7 @@ Por ahora se enfoca en:
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -41,6 +42,40 @@ class ProductoOut(BaseModel):
     stockMinimo: int
     cantidadActual: int
     estado: str
+
+
+class ProductoDetailOut(BaseModel):
+    id: str
+    nombre: str
+    categoria: str
+    unidad: str
+    stockMinBambiEnlace: float
+    stockMinBambiII: float
+    stockMinBambiIII: float
+    stockMinBambiIV: float
+    stockMinBambiV: float
+
+
+class ProductoUpdateIn(BaseModel):
+    nombre: Optional[str] = None
+    categoria: Optional[str] = None
+    unidad: Optional[str] = None
+    stockMinBambiEnlace: Optional[float] = None
+    stockMinBambiII: Optional[float] = None
+    stockMinBambiIII: Optional[float] = None
+    stockMinBambiIV: Optional[float] = None
+    stockMinBambiV: Optional[float] = None
+
+
+class ProductoCreateIn(BaseModel):
+    nombre: str
+    categoria: str
+    unidad: str
+    stockMinBambiEnlace: float = 0
+    stockMinBambiII: float = 0
+    stockMinBambiIII: float = 0
+    stockMinBambiIV: float = 0
+    stockMinBambiV: float = 0
 
 
 class SedeOut(BaseModel):
@@ -366,6 +401,13 @@ def _stock_min_for_sede(prod: Dict[str, Any], sede_id: str) -> float:
         return 0.0
 
 
+def _producto_id_desde_nombre(nombre: str) -> str:
+    base = " ".join(nombre.strip().split())
+    base = re.sub(r"\s+", "_", base)
+    base = re.sub(r"[^A-Za-z0-9_]", "", base)
+    return base.upper()
+
+
 @app.get("/inventario/productos", response_model=List[ProductoOut])
 def listar_productos(sedeId: str = Query(..., alias="sedeId")):
     productos_col = get_collection("productos")
@@ -406,6 +448,28 @@ def listar_productos(sedeId: str = Query(..., alias="sedeId")):
     return resultados
 
 
+@app.get("/inventario/productos/{producto_id}", response_model=ProductoDetailOut)
+def obtener_detalle_producto(producto_id: str):
+    """Obtiene todos los detalles de un producto, incluyendo stock mínimo de todas las sedes."""
+    productos_col = get_collection("productos")
+
+    prod = productos_col.find_one({"_id": producto_id})
+    if not prod:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    return ProductoDetailOut(
+        id=prod.get("_id", ""),
+        nombre=prod.get("nombre", ""),
+        categoria=prod.get("categoria", ""),
+        unidad=prod.get("unidad", ""),
+        stockMinBambiEnlace=float(prod.get("stockMinBambiEnlace", 0)),
+        stockMinBambiII=float(prod.get("stockMinBambiII", 0)),
+        stockMinBambiIII=float(prod.get("stockMinBambiIII", 0)),
+        stockMinBambiIV=float(prod.get("stockMinBambiIV", 0)),
+        stockMinBambiV=float(prod.get("stockMinBambiV", 0)),
+    )
+
+
 @app.get("/inventario/historial", response_model=List[MovimientoInventarioOut])
 def listar_historial_inventario(sedeId: str = Query(..., alias="sedeId")):
     historial_col = get_collection("inventario_historial")
@@ -432,6 +496,103 @@ def listar_historial_inventario(sedeId: str = Query(..., alias="sedeId")):
         )
 
     return resultados
+
+
+@app.put("/inventario/productos/{producto_id}", response_model=ProductoOut)
+def actualizar_producto(producto_id: str, payload: ProductoUpdateIn, sedeId: str = Query(..., alias="sedeId")):
+    """Actualiza los detalles de un producto (nombre, categoría, unidad, stock mínimo por sede)."""
+    productos_col = get_collection("productos")
+    inventario_col = get_collection("inventario_sedes")
+
+    # Validar que el producto existe
+    prod = productos_col.find_one({"_id": producto_id})
+    if not prod:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    # Construir el documento de actualización
+    update_doc = {}
+    if payload.nombre is not None:
+        update_doc["nombre"] = payload.nombre
+    if payload.categoria is not None:
+        update_doc["categoria"] = payload.categoria
+    if payload.unidad is not None:
+        update_doc["unidad"] = payload.unidad
+    if payload.stockMinBambiEnlace is not None:
+        update_doc["stockMinBambiEnlace"] = payload.stockMinBambiEnlace
+    if payload.stockMinBambiII is not None:
+        update_doc["stockMinBambiII"] = payload.stockMinBambiII
+    if payload.stockMinBambiIII is not None:
+        update_doc["stockMinBambiIII"] = payload.stockMinBambiIII
+    if payload.stockMinBambiIV is not None:
+        update_doc["stockMinBambiIV"] = payload.stockMinBambiIV
+    if payload.stockMinBambiV is not None:
+        update_doc["stockMinBambiV"] = payload.stockMinBambiV
+
+    # Actualizar en la BD
+    productos_col.update_one({"_id": producto_id}, {"$set": update_doc})
+
+    # Recargar producto actualizado
+    prod = productos_col.find_one({"_id": producto_id})
+    prod.update(update_doc)
+
+    # Obtener inventario actual para la sede
+    inv = inventario_col.find_one({"sedeId": sedeId, "productoId": producto_id}) or {}
+    cantidad_actual = float(inv.get("cantidadActual", 0))
+    stock_min = _stock_min_for_sede(prod, sedeId)
+
+    estado = inv.get("estado", "NORMAL")
+    if stock_min > 0 and cantidad_actual < stock_min:
+        estado = "STOCK_BAJO"
+
+    return ProductoOut(
+        id=producto_id,
+        nombre=prod.get("nombre", ""),
+        categoria=prod.get("categoria", ""),
+        unidad=prod.get("unidad", ""),
+        stockMinimo=int(stock_min),
+        cantidadActual=int(cantidad_actual),
+        estado=estado,
+    )
+
+
+@app.post("/inventario/productos", response_model=ProductoDetailOut)
+def crear_producto(payload: ProductoCreateIn):
+    productos_col = get_collection("productos")
+
+    nombre_limpio = " ".join(payload.nombre.strip().split())
+    producto_id = _producto_id_desde_nombre(nombre_limpio)
+    if not producto_id:
+        raise HTTPException(status_code=400, detail="No se pudo generar ID desde el nombre")
+
+    existente = productos_col.find_one({"_id": producto_id})
+    if existente:
+        raise HTTPException(status_code=400, detail="Ya existe un producto con ese ID")
+
+    doc = {
+        "_id": producto_id,
+        "nombre": nombre_limpio,
+        "categoria": payload.categoria.strip(),
+        "unidad": payload.unidad.strip(),
+        "stockMinBambiEnlace": float(payload.stockMinBambiEnlace),
+        "stockMinBambiII": float(payload.stockMinBambiII),
+        "stockMinBambiIII": float(payload.stockMinBambiIII),
+        "stockMinBambiIV": float(payload.stockMinBambiIV),
+        "stockMinBambiV": float(payload.stockMinBambiV),
+    }
+
+    productos_col.insert_one(doc)
+
+    return ProductoDetailOut(
+        id=doc["_id"],
+        nombre=doc["nombre"],
+        categoria=doc["categoria"],
+        unidad=doc["unidad"],
+        stockMinBambiEnlace=doc["stockMinBambiEnlace"],
+        stockMinBambiII=doc["stockMinBambiII"],
+        stockMinBambiIII=doc["stockMinBambiIII"],
+        stockMinBambiIV=doc["stockMinBambiIV"],
+        stockMinBambiV=doc["stockMinBambiV"],
+    )
 
 
 @app.post("/inventario/movimiento", response_model=MovimientoInventarioOut)
