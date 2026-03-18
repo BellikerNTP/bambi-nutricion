@@ -1056,8 +1056,8 @@ def _categoria_para_cargo(cargo_id: str, tipo: int | None) -> tuple[Optional[str
 
     - NNA -> Niños
     - IDs que comienzan por "TIAS" -> Tías
-    - tipo == 2 -> Adultos importantes
-    - tipo == 1 -> Adultos secundarios
+    - tipo == 2 -> Personas Rendición
+    - tipo == 1 -> Personas no Rendición
     """
 
     if cargo_id == "NNA":
@@ -1065,9 +1065,9 @@ def _categoria_para_cargo(cargo_id: str, tipo: int | None) -> tuple[Optional[str
     if cargo_id.startswith("TIAS"):
         return "TIAS", "Tías"
     if tipo == 2:
-        return "ADULTOS_IMPORTANTES", "Adultos importantes"
+        return "ADULTOS_IMPORTANTES", "Personas Rendición"
     if tipo == 1:
-        return "ADULTOS_SECUNDARIOS", "Adultos secundarios"
+        return "ADULTOS_SECUNDARIOS", "Personas no Rendición"
     return None, None
 
 
@@ -1139,8 +1139,8 @@ def resumen_platos_servidos(
     definiciones = [
         ("NINOS", "Niños"),
         ("TIAS", "Tías"),
-        ("ADULTOS_IMPORTANTES", "Adultos importantes"),
-        ("ADULTOS_SECUNDARIOS", "Adultos secundarios"),
+        ("ADULTOS_IMPORTANTES", "Personas Rendición"),
+        ("ADULTOS_SECUNDARIOS", "Personas no Rendición"),
     ]
 
     for codigo, nombre in definiciones:
@@ -1221,7 +1221,9 @@ def resumen_platos_por_tipo(
     tipos_resumen: List[TipoPlatoResumen] = []
 
     # Mantener un orden consistente por nombre de tipo de plato
-    for tipo_id in sorted(totales_por_tipo.keys(), key=lambda k: tipos_nombres.get(k, k)):
+    # e incluir todos los tipos definidos aunque tengan total 0.
+    all_tipo_ids = set(tipos_nombres.keys()) | set(totales_por_tipo.keys())
+    for tipo_id in sorted(all_tipo_ids, key=lambda k: tipos_nombres.get(k, k)):
         nombre = tipos_nombres.get(tipo_id, tipo_id)
         sede_map = por_tipo_y_sede.get(tipo_id, {})
         tipos_resumen.append(

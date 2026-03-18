@@ -861,13 +861,15 @@ class _DialogoModificarProductoState extends State<_DialogoModificarProducto> {
   Widget build(BuildContext context) {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 900),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               Text(
                 'Modificar producto',
                 style: Theme.of(context).textTheme.titleLarge,
@@ -979,6 +981,7 @@ class _DialogoModificarProductoState extends State<_DialogoModificarProducto> {
                 ],
               ),
             ],
+            ),
           ),
         ),
       ),
@@ -1134,13 +1137,15 @@ class _DialogoNuevoProductoState extends State<_DialogoNuevoProducto> {
   Widget build(BuildContext context) {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 900),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               Text(
                 'Nuevo producto',
                 style: Theme.of(context).textTheme.titleLarge,
@@ -1247,9 +1252,10 @@ class _DialogoNuevoProductoState extends State<_DialogoNuevoProducto> {
                   ),
                 ],
               ),
-            ],
+              ],
+              ),
+            ),
           ),
-        ),
       ),
     );
   }

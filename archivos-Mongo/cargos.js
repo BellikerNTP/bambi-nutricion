@@ -56,12 +56,6 @@ dbConn.cargos.insertMany([
   // PERSONAL
 
   {
-    _id: "COCINA",
-    nombre: "Cocina",
-    tipo: 2,
-    sedes: ["BAMBI_III", "BAMBI_V"]
-  },
-  {
     _id: "AUX_COCINA",
     nombre: "Auxiliar de cocina",
     tipo: 2,

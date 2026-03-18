@@ -577,11 +577,21 @@ class _CargoEditable {
     required this.id,
     required String nombre,
     required List<String> sedes,
+    required this.tipo,
   })  : nombreController = TextEditingController(text: nombre),
-        sedesSeleccionadas = {...sedes};
+        nombreOriginal = nombre,
+        tipoOriginal = tipo,
+        sedesOriginales = {...sedes},
+        sedesSeleccionadas = {...sedes} {
+    eliminado = tipo == 0;
+  }
 
   final String id;
+  int tipo;
   final TextEditingController nombreController;
+  final String nombreOriginal;
+  final int tipoOriginal;
+  final Set<String> sedesOriginales;
   final Set<String> sedesSeleccionadas;
   bool eliminado = false;
 }
@@ -707,7 +717,7 @@ class _EditarCargosDialogState extends State<_EditarCargosDialog> {
     super.initState();
     _editables = [
       for (final c in widget.cargos)
-        _CargoEditable(id: c.id, nombre: c.nombre, sedes: c.sedes),
+        _CargoEditable(id: c.id, nombre: c.nombre, sedes: c.sedes, tipo: c.tipo),
     ];
   }
 
@@ -763,10 +773,53 @@ class _EditarCargosDialogState extends State<_EditarCargosDialog> {
                                 ),
                               ),
                               const SizedBox(width: 8),
+                              SizedBox(
+                                width: 220,
+                                child: DropdownButtonFormField<int>(
+                                  value: editable.eliminado
+                                      ? 0
+                                      : (editable.tipo == 2 || editable.tipo == 1
+                                          ? editable.tipo
+                                          : 1),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Tipo',
+                                    isDense: true,
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  items: const [
+                                    DropdownMenuItem(
+                                      value: 2,
+                                      child: Text('Rendición'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 1,
+                                      child: Text('No Rendición'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 0,
+                                      child: Text('Desactivado'),
+                                    ),
+                                  ],
+                                  onChanged: (value) {
+                                    if (value == null) return;
+                                    setState(() {
+                                      editable.tipo = value;
+                                      editable.eliminado = value == 0;
+                                    });
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 8),
                               TextButton.icon(
                                 onPressed: () {
                                   setState(() {
                                     editable.eliminado = !editable.eliminado;
+                                    if (editable.eliminado) {
+                                      editable.tipo = 0;
+                                    } else if (editable.tipo == 0) {
+                                      // Si se restaura desde eliminado, por defecto dejar como No Rendición
+                                      editable.tipo = 1;
+                                    }
                                   });
                                 },
                                 icon: Icon(
@@ -852,16 +905,27 @@ class _EditarCargosDialogState extends State<_EditarCargosDialog> {
           final nombre = editable.nombreController.text.trim();
           if (nombre.isEmpty) continue;
 
-          final tipo = editable.eliminado ? 0 : 1;
-          final sedes =
+          final tipoNuevo = editable.eliminado ? 0 : editable.tipo;
+          final sedesNuevas =
               editable.eliminado ? <String>[] : editable.sedesSeleccionadas.toList();
+
+          // Comparar con el estado original; si no cambió nada, no hacer PUT
+          final mismoNombre = nombre == editable.nombreOriginal;
+          final mismoTipo = tipoNuevo == editable.tipoOriginal;
+          final mismasSedes =
+              Set<String>.from(sedesNuevas).difference(editable.sedesOriginales).isEmpty &&
+              editable.sedesOriginales.difference(Set<String>.from(sedesNuevas)).isEmpty;
+
+          if (mismoNombre && mismoTipo && mismasSedes) {
+            continue;
+          }
 
           await widget.apiClient.putJson(
             '/cargos/${editable.id}',
             {
               'nombre': nombre,
-              'tipo': tipo,
-              'sedes': sedes,
+              'tipo': tipoNuevo,
+              'sedes': sedesNuevas,
               'observaciones': null,
             },
           );

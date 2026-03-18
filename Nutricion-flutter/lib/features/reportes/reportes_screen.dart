@@ -355,9 +355,6 @@ class _ReportesScreenState extends State<ReportesScreen>
     if (_error != null) {
       return const SizedBox.shrink();
     }
-    if (_tiposPlato.isEmpty || _sedes.isEmpty) {
-      return const Text('No hay datos por tipo de plato para este rango.');
-    }
 
     return Container(
       decoration: BoxDecoration(
