@@ -176,7 +176,7 @@ class _InventarioScreenState extends State<InventarioScreen>
             child: SizedBox(
               width: 260,
               child: DropdownButtonFormField<String>(
-                value: widget.selectedSede.id,
+                initialValue: widget.selectedSede.id,
                 decoration: const InputDecoration(
                   labelText: 'Sede del inventario',
                   border: OutlineInputBorder(),
@@ -1445,8 +1445,12 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
   final Map<String, String> _cantidadesEntrada = {};
 
   // Para transferencias: producto y sede destino
-  late String _productoSeleccionadoId;
   String? _sedeDestinoId;
+  String _modoTransferencia = 'stock_minimo_destino';
+  final Set<String> _productosTransferenciaSeleccionados = {};
+  final Map<String, String> _cantidadesTransferenciaPersonalizada = {};
+  bool _cargandoResumenTransferencia = false;
+  bool _cargandoResumenReabastecimiento = false;
 
   // Para ajustes: cantidad final (conteo real) por producto
   final Map<String, String> _cantidadesAjuste = {};
@@ -1456,8 +1460,6 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
   @override
   void initState() {
     super.initState();
-    _productoSeleccionadoId =
-        widget.productos.isNotEmpty ? widget.productos.first.id : '';
     if (widget.sedesDestino.isNotEmpty) {
       _sedeDestinoId = widget.sedesDestino.first.id;
     }
@@ -1506,6 +1508,12 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
                   onChanged: _onTipoChanged,
                 ),
                 _TipoChip(
+                  label: 'Reabastecimiento mensual',
+                  value: 'reabastecimiento',
+                  groupValue: _tipo,
+                  onChanged: _onTipoChanged,
+                ),
+                _TipoChip(
                   label: 'Ajuste de inventario',
                   value: 'ajuste',
                   groupValue: _tipo,
@@ -1514,7 +1522,7 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
               ],
             ),
             const SizedBox(height: 12),
-            if (_tipo == 'entrada' || _tipo == 'ajuste') ...[
+            if (_tipo == 'entrada' || _tipo == 'ajuste' || _tipo == 'transferencia') ...[
               TextField(
                 controller: _busquedaProductoController,
                 decoration: const InputDecoration(
@@ -1543,14 +1551,45 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
                     );
                   }
                   if (_tipo == 'transferencia') {
-                    return _TransferenciaForm(
+                    return _TransferenciaMultipleForm(
                       productos: widget.productos,
-                      productoSeleccionadoId: _productoSeleccionadoId,
-                      onProductoChanged: (value) {
+                      sedesDestino: widget.sedesDestino,
+                      sedeDestinoId: _sedeDestinoId,
+                      onSedeDestinoChanged: (value) {
                         setState(() {
-                          _productoSeleccionadoId = value;
+                          _sedeDestinoId = value;
                         });
                       },
+                      modoTransferencia: _modoTransferencia,
+                      onModoTransferenciaChanged: (value) {
+                        setState(() {
+                          _modoTransferencia = value;
+                        });
+                      },
+                      productosSeleccionados: _productosTransferenciaSeleccionados,
+                      cantidadesPersonalizadas: _cantidadesTransferenciaPersonalizada,
+                      onProductoSeleccionadoChanged: (productoId, selected) {
+                        setState(() {
+                          if (selected) {
+                            _productosTransferenciaSeleccionados.add(productoId);
+                          } else {
+                            _productosTransferenciaSeleccionados.remove(productoId);
+                          }
+                        });
+                      },
+                      onCantidadPersonalizadaChanged: (productoId, cantidad) {
+                        setState(() {
+                          _cantidadesTransferenciaPersonalizada[productoId] = cantidad;
+                        });
+                      },
+                      terminoBusqueda: _terminoBusquedaProducto,
+                      onVerResumenTransferencia: _verResumenTransferencia,
+                      cargandoResumenTransferencia: _cargandoResumenTransferencia,
+                      motivoController: _motivoTransferenciaController,
+                    );
+                  }
+                  if (_tipo == 'reabastecimiento') {
+                    return _ReabastecimientoMensualForm(
                       sedesDestino: widget.sedesDestino,
                       sedeDestinoId: _sedeDestinoId,
                       onSedeDestinoChanged: (value) {
@@ -1559,6 +1598,8 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
                         });
                       },
                       motivoController: _motivoTransferenciaController,
+                      onVerResumenAbastecimiento: _verResumenAbastecimiento,
+                      cargandoResumenAbastecimiento: _cargandoResumenReabastecimiento,
                     );
                   }
                   return _AjusteForm(
@@ -1591,6 +1632,210 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
     setState(() {
       _tipo = value;
     });
+  }
+
+  Future<void> _verResumenAbastecimiento() async {
+    final sedeDestinoId = _sedeDestinoId;
+    if (sedeDestinoId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona una sede destino para ver el resumen.')),
+      );
+      return;
+    }
+
+    final motivo = _motivoTransferenciaController.text.trim();
+
+    setState(() {
+      _cargandoResumenReabastecimiento = true;
+    });
+
+    try {
+      final resumen = await _apiClient.postJson(
+        '/inventario/abastecer-stock-minimo/resumen',
+        {
+          'sedeId': widget.sedeId,
+          'sedeDestinoId': sedeDestinoId,
+          'motivo': motivo.isEmpty ? null : motivo,
+        },
+      );
+
+      if (!mounted) return;
+
+      final items = List<Map<String, dynamic>>.from(
+        (resumen['items'] as List?) ?? const [],
+      );
+
+      final totalProductos = (resumen['totalProductosTransferir'] as num?)?.toInt() ?? 0;
+      final totalCantidad = (resumen['totalCantidadTransferir'] as num?)?.toDouble() ?? 0;
+      final omitidosStockCero = (resumen['omitidosStockMinimoCero'] as num?)?.toInt() ?? 0;
+      final omitidosSinStock = (resumen['omitidosSinStockOrigen'] as num?)?.toInt() ?? 0;
+
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Resumen de abastecimiento'),
+            content: SizedBox(
+              width: 900,
+              height: 560,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Productos a transferir: $totalProductos'),
+                  Text('Cantidad total a transferir: ${totalCantidad.toStringAsFixed(2)}'),
+                  Text('Omitidos por stock mínimo 0: $omitidosStockCero'),
+                  Text('Omitidos por falta de stock en origen: $omitidosSinStock'),
+                  const SizedBox(height: 10),
+                  const Divider(height: 1),
+                  const SizedBox(height: 10),
+                  if (items.isEmpty)
+                    const Expanded(
+                      child: Center(
+                        child: Text('No hay productos para transferir con la configuración actual.'),
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final item = items[index];
+                          final nombre = item['nombre']?.toString() ?? item['productoId']?.toString() ?? '-';
+                          final unidad = item['unidad']?.toString() ?? '';
+                          final transferir = (item['cantidadTransferir'] as num?)?.toDouble() ?? 0;
+                          final stockMin = (item['stockMinimoDestino'] as num?)?.toDouble() ?? 0;
+                          final stockOrigen = (item['stockDisponibleOrigen'] as num?)?.toDouble() ?? 0;
+
+                          return ListTile(
+                            dense: true,
+                            title: Text(nombre),
+                            subtitle: Text(
+                              'Transferir: ${transferir.toStringAsFixed(2)} $unidad | '
+                              'Stock mínimo destino: ${stockMin.toStringAsFixed(2)} | '
+                              'Disponible origen: ${stockOrigen.toStringAsFixed(2)}',
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cerrar'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al cargar resumen de abastecimiento: $e')),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _cargandoResumenReabastecimiento = false;
+      });
+    }
+  }
+
+  Future<void> _verResumenTransferencia() async {
+    final sedeDestinoId = _sedeDestinoId;
+    if (sedeDestinoId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona una sede destino para ver el resumen.')),
+      );
+      return;
+    }
+
+    if (_productosTransferenciaSeleccionados.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona al menos un producto para transferir.')),
+      );
+      return;
+    }
+
+    final bool personalizada = _modoTransferencia == 'personalizada';
+    final resumen = <Map<String, String>>[];
+
+    for (final p in widget.productos.where((e) => _productosTransferenciaSeleccionados.contains(e.id))) {
+      String cantidadTxt;
+      if (personalizada) {
+        final raw = (_cantidadesTransferenciaPersonalizada[p.id] ?? '').trim();
+        final cantidad = int.tryParse(raw) ?? 0;
+        if (cantidad <= 0) continue;
+        cantidadTxt = '$cantidad ${p.unidad} (personalizada)';
+      } else {
+        cantidadTxt = 'Según stock mínimo de destino';
+      }
+      resumen.add({'producto': p.nombre, 'cantidad': cantidadTxt});
+    }
+
+    if (resumen.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay productos válidos para mostrar en el resumen.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _cargandoResumenTransferencia = true;
+    });
+
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Resumen de transferencia múltiple'),
+            content: SizedBox(
+              width: 820,
+              height: 500,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Sede destino: $sedeDestinoId'),
+                  Text('Modo: ${personalizada ? 'Cantidad personalizada' : 'Stock mínimo destino'}'),
+                  const SizedBox(height: 8),
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: resumen.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final r = resumen[index];
+                        return ListTile(
+                          dense: true,
+                          title: Text(r['producto'] ?? '-'),
+                          subtitle: Text(r['cantidad'] ?? '-'),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cerrar'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _cargandoResumenTransferencia = false;
+      });
+    }
   }
 
   void _onSubmit() {
@@ -1652,11 +1897,18 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
         }
       }();
     } else if (_tipo == 'transferencia') {
-      if (_productoSeleccionadoId.isEmpty || _sedeDestinoId == null) {
+      if (_sedeDestinoId == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Selecciona un producto y una sede destino.'),
+            content: Text('Selecciona la sede destino.'),
           ),
+        );
+        return;
+      }
+
+      if (_productosTransferenciaSeleccionados.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Selecciona al menos un producto para transferir.')),
         );
         return;
       }
@@ -1666,24 +1918,52 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
 
       () async {
         try {
-          await _apiClient.postJson(
-            '/inventario/movimiento',
-            {
-              'tipo': 'transferencia',
-              'productoId': _productoSeleccionadoId,
-              'sedeId': widget.sedeId,
-              'cantidad': 0, // se calculará en el backend
-              'motivo': motivo.isEmpty ? null : motivo,
-              'sedeOrigenId': widget.sedeId,
-              'sedeDestinoId': sedeDestinoId,
-            },
+          int exitos = 0;
+          int omitidos = 0;
+
+          for (final p in widget.productos.where((e) => _productosTransferenciaSeleccionados.contains(e.id))) {
+            int cantidadEnviar = 0;
+            String modoTransferencia = 'stock_minimo_destino';
+
+            if (_modoTransferencia == 'personalizada') {
+              final raw = (_cantidadesTransferenciaPersonalizada[p.id] ?? '').trim();
+              final parsed = int.tryParse(raw) ?? 0;
+              if (parsed <= 0) {
+                omitidos += 1;
+                continue;
+              }
+              cantidadEnviar = parsed;
+              modoTransferencia = 'personalizada';
+            }
+
+            try {
+              await _apiClient.postJson(
+                '/inventario/movimiento',
+                {
+                  'tipo': 'transferencia',
+                  'productoId': p.id,
+                  'sedeId': widget.sedeId,
+                  'cantidad': cantidadEnviar,
+                  'modoTransferencia': modoTransferencia,
+                  'motivo': motivo.isEmpty ? null : motivo,
+                  'sedeOrigenId': widget.sedeId,
+                  'sedeDestinoId': sedeDestinoId,
+                },
+              );
+              exitos += 1;
+            } catch (_) {
+              omitidos += 1;
+            }
+          }
+
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Transferencia múltiple finalizada. Exitosas: $exitos. Omitidas: $omitidos.'),
+            ),
           );
 
           if (!mounted) return;
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Transferencia registrada correctamente.')),
-          );
 
           await widget.onSaved();
 
@@ -1694,6 +1974,52 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error al registrar transferencia: $e')),
+          );
+        }
+      }();
+    } else if (_tipo == 'reabastecimiento') {
+      if (_sedeDestinoId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Selecciona la sede destino para el reabastecimiento.')),
+        );
+        return;
+      }
+
+      final motivo = _motivoTransferenciaController.text.trim();
+      final sedeDestinoId = _sedeDestinoId!;
+
+      () async {
+        try {
+          final resp = await _apiClient.postJson(
+            '/inventario/abastecer-stock-minimo',
+            {
+              'sedeId': widget.sedeId,
+              'sedeDestinoId': sedeDestinoId,
+              'motivo': motivo.isEmpty ? null : motivo,
+            },
+          );
+
+          final transferidos = (resp['transferidos'] as num?)?.toInt() ?? 0;
+          final omitidos = (resp['omitidosStockMinimoCero'] as num?)?.toInt() ?? 0;
+
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Reabastecimiento completado. Productos transferidos: $transferidos. Omitidos por stock mínimo 0: $omitidos.',
+              ),
+            ),
+          );
+
+          await widget.onSaved();
+
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error al registrar reabastecimiento: $e')),
           );
         }
       }();
@@ -1861,66 +2187,135 @@ class _EntradaForm extends StatelessWidget {
   }
 }
 
-class _TransferenciaForm extends StatelessWidget {
-  const _TransferenciaForm({
+class _TransferenciaMultipleForm extends StatelessWidget {
+  const _TransferenciaMultipleForm({
     required this.productos,
-    required this.productoSeleccionadoId,
-    required this.onProductoChanged,
     required this.sedesDestino,
     required this.sedeDestinoId,
     required this.onSedeDestinoChanged,
+    required this.modoTransferencia,
+    required this.onModoTransferenciaChanged,
+    required this.productosSeleccionados,
+    required this.cantidadesPersonalizadas,
+    required this.onProductoSeleccionadoChanged,
+    required this.onCantidadPersonalizadaChanged,
+    required this.terminoBusqueda,
+    required this.onVerResumenTransferencia,
+    required this.cargandoResumenTransferencia,
     required this.motivoController,
   });
 
   final List<_Producto> productos;
-  final String productoSeleccionadoId;
-  final ValueChanged<String> onProductoChanged;
   final List<Sede> sedesDestino;
   final String? sedeDestinoId;
   final ValueChanged<String?> onSedeDestinoChanged;
+  final String modoTransferencia;
+  final ValueChanged<String> onModoTransferenciaChanged;
+  final Set<String> productosSeleccionados;
+  final Map<String, String> cantidadesPersonalizadas;
+  final void Function(String productoId, bool selected) onProductoSeleccionadoChanged;
+  final void Function(String productoId, String cantidad) onCantidadPersonalizadaChanged;
+  final String terminoBusqueda;
+  final VoidCallback onVerResumenTransferencia;
+  final bool cargandoResumenTransferencia;
   final TextEditingController motivoController;
 
   @override
   Widget build(BuildContext context) {
+    final filtro = terminoBusqueda.toLowerCase().trim();
+    final productosFiltrados = productos
+        .where((p) => filtro.isEmpty || p.nombre.toLowerCase().contains(filtro))
+        .toList(growable: false);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DropdownButtonFormField<String>(
-          value: productoSeleccionadoId.isEmpty ? null : productoSeleccionadoId,
-          decoration: const InputDecoration(
-            labelText: 'Producto a transferir',
-            border: OutlineInputBorder(),
-          ),
-          items: [
-            for (final p in productos)
-              DropdownMenuItem(
-                value: p.id,
-                child: Text(p.nombre),
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: modoTransferencia,
+                decoration: const InputDecoration(
+                  labelText: 'Modo de transferencia',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'stock_minimo_destino',
+                    child: Text('Stock mínimo de destino'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'personalizada',
+                    child: Text('Cantidad personalizada'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    onModoTransferenciaChanged(value);
+                  }
+                },
               ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: sedeDestinoId,
+                decoration: const InputDecoration(
+                  labelText: 'Sede destino',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final s in sedesDestino)
+                    DropdownMenuItem(value: s.id, child: Text(s.nombre)),
+                ],
+                onChanged: onSedeDestinoChanged,
+              ),
+            ),
           ],
-          onChanged: (value) {
-            if (value != null) {
-              onProductoChanged(value);
-            }
-          },
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          value: sedeDestinoId,
-          decoration: const InputDecoration(
-            labelText: 'Sede destino',
-            border: OutlineInputBorder(),
+        Expanded(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: ListView.separated(
+              padding: const EdgeInsets.all(8),
+              itemCount: productosFiltrados.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final p = productosFiltrados[index];
+                final selected = productosSeleccionados.contains(p.id);
+
+                return Row(
+                  children: [
+                    Checkbox(
+                      value: selected,
+                      onChanged: (value) => onProductoSeleccionadoChanged(p.id, value ?? false),
+                    ),
+                    Expanded(
+                      child: Text('${p.nombre} (${p.unidad})'),
+                    ),
+                    if (modoTransferencia == 'personalizada')
+                      SizedBox(
+                        width: 130,
+                        child: TextFormField(
+                          initialValue: cantidadesPersonalizadas[p.id] ?? '',
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Cantidad',
+                            isDense: true,
+                            border: OutlineInputBorder(),
+                          ),
+                          onChanged: (value) => onCantidadPersonalizadaChanged(p.id, value),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
           ),
-          items: [
-            for (final s in sedesDestino)
-              DropdownMenuItem(
-                value: s.id,
-                child: Text(s.nombre),
-              ),
-          ],
-          onChanged: (value) {
-            onSedeDestinoChanged(value);
-          },
         ),
         const SizedBox(height: 12),
         TextField(
@@ -1931,10 +2326,87 @@ class _TransferenciaForm extends StatelessWidget {
             border: OutlineInputBorder(),
           ),
         ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: cargandoResumenTransferencia ? null : onVerResumenTransferencia,
+            icon: cargandoResumenTransferencia
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.summarize_outlined),
+            label: const Text('Ver resumen de transferencia'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ReabastecimientoMensualForm extends StatelessWidget {
+  const _ReabastecimientoMensualForm({
+    required this.sedesDestino,
+    required this.sedeDestinoId,
+    required this.onSedeDestinoChanged,
+    required this.motivoController,
+    required this.onVerResumenAbastecimiento,
+    required this.cargandoResumenAbastecimiento,
+  });
+
+  final List<Sede> sedesDestino;
+  final String? sedeDestinoId;
+  final ValueChanged<String?> onSedeDestinoChanged;
+  final TextEditingController motivoController;
+  final VoidCallback onVerResumenAbastecimiento;
+  final bool cargandoResumenAbastecimiento;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          initialValue: sedeDestinoId,
+          decoration: const InputDecoration(
+            labelText: 'Sede destino',
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            for (final s in sedesDestino)
+              DropdownMenuItem(value: s.id, child: Text(s.nombre)),
+          ],
+          onChanged: onSedeDestinoChanged,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: motivoController,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'Motivo (opcional)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: cargandoResumenAbastecimiento ? null : onVerResumenAbastecimiento,
+            icon: cargandoResumenAbastecimiento
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.summarize_outlined),
+            label: const Text('Ver resumen de abastecimiento'),
+          ),
+        ),
         const SizedBox(height: 8),
         const Text(
-          'Se calculará automáticamente la cantidad a transferir según el stock mínimo en la sede destino. '
-          'Esa cantidad se restará del inventario de la sede actual y se sumará al inventario de la sede destino.',
+          'Reabastecimiento mensual: transfiere masivamente productos según stock mínimo de la sede destino y omite los que tengan stock mínimo 0.',
           style: TextStyle(fontSize: 11, color: Colors.grey),
         ),
       ],

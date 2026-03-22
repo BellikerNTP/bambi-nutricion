@@ -36,6 +36,8 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
   String? _errorConfig;
   List<Sede> _sedesConfig = const [];
   List<_CargoConfig> _cargosConfig = const [];
+  bool _cargandoRegistrosComida = true;
+  List<_RegistroComida> _registrosComida = const [];
   final ScrollController _tablaHorizontalController = ScrollController();
 
   @override
@@ -51,6 +53,7 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
       // La configuración de cargos x sedes es global, pero por si acaso
       // recargamos cuando cambie la sede seleccionada.
       _cargarConfiguracionCargosYSedes();
+      _cargarRegistrosComida();
     }
   }
 
@@ -111,7 +114,7 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
           sedeInicial: widget.selectedSede,
         );
       },
-    );
+    ).then((_) => _cargarRegistrosComida());
   }
 
   void _abrirEditarCargos() {
@@ -125,6 +128,23 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
           sedes: _sedesConfig,
           apiClient: _apiClient,
           onSaved: _cargarConfiguracionCargosYSedes,
+        );
+      },
+    );
+  }
+
+  void _abrirVerRegistrosPlatos() {
+    if (_sedesConfig.isEmpty || _cargosConfig.isEmpty) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return _RegistrosComidaAgrupadosDialog(
+          sedeSeleccionada: widget.selectedSede,
+          sedes: _sedesConfig,
+          cargos: _cargosConfig,
+          apiClient: _apiClient,
+          onReload: _cargarRegistrosComida,
         );
       },
     );
@@ -176,12 +196,45 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
         _cargosConfig = cargos;
         _cargandoConfig = false;
       });
+      await _cargarRegistrosComida();
     } catch (e) {
       setState(() {
         _cargandoConfig = false;
         _errorConfig = 'Error al cargar configuración de cargos: $e';
         _sedesConfig = const [];
         _cargosConfig = const [];
+        _registrosComida = const [];
+      });
+    }
+  }
+
+  Future<void> _cargarRegistrosComida() async {
+    if (!mounted) return;
+
+    setState(() {
+      _cargandoRegistrosComida = true;
+    });
+
+    try {
+        final data = await _apiClient.getJsonList(
+          '/platos/registros-comida',
+          query: {'limit': '300'},
+      );
+
+      final registros = data
+          .map((e) => _RegistroComida.fromJson(e as Map<String, dynamic>))
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        _registrosComida = registros;
+        _cargandoRegistrosComida = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _registrosComida = const [];
+        _cargandoRegistrosComida = false;
       });
     }
   }
@@ -214,12 +267,23 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Cargos contados por sede',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Cargos contados por sede',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _abrirVerRegistrosPlatos,
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text('Ver registro de platos'),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             Expanded(
@@ -528,6 +592,25 @@ class _PlatosServidosScreenState extends State<PlatosServidosScreen> {
       _ingredientesSeleccionados[index].cantidad = cantidad;
     });
   }
+
+  String _formatoFechaSimple(DateTime fecha) {
+    return '${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}';
+  }
+
+  String _sedeLabel(String sedeId) {
+    for (final sede in _sedesConfig) {
+      if (sede.id == sedeId) {
+        return sede.nombre;
+      }
+    }
+    return sedeId;
+  }
+
+  String _tipoComidaLabel(String tipoId) {
+    final limpio = tipoId.replaceAll('_', ' ').toLowerCase();
+    if (limpio.isEmpty) return tipoId;
+    return limpio[0].toUpperCase() + limpio.substring(1);
+  }
 }
 
 class _PlatoHistorial {
@@ -544,6 +627,799 @@ class _PlatoHistorial {
   final String cargoId;
   final String nombrePlato;
   final int cantidadPersonas;
+}
+
+class _RegistroComida {
+  const _RegistroComida({
+    required this.id,
+    required this.fecha,
+    required this.sedeId,
+    required this.tipoComida,
+    required this.cargoId,
+    required this.cantidadPersonas,
+    this.observaciones,
+  });
+
+  final String id;
+  final DateTime fecha;
+  final String sedeId;
+  final String tipoComida;
+  final String cargoId;
+  final int cantidadPersonas;
+  final String? observaciones;
+
+  factory _RegistroComida.fromJson(Map<String, dynamic> json) {
+    return _RegistroComida(
+      id: json['id'] as String,
+      fecha: DateTime.parse(json['fecha'] as String),
+      sedeId: json['sedeId'] as String,
+      tipoComida: json['tipoComida'] as String,
+      cargoId: json['cargoId'] as String,
+      cantidadPersonas: (json['cantidadPersonas'] as num?)?.toInt() ?? 0,
+      observaciones: json['observaciones'] as String?,
+    );
+  }
+}
+
+class _RegistroComidaGrupo {
+  const _RegistroComidaGrupo({
+    required this.fechaHora,
+    required this.sedeId,
+    required this.tipoComida,
+    required this.registros,
+  });
+
+  final DateTime fechaHora;
+  final String sedeId;
+  final String tipoComida;
+  final List<_RegistroComida> registros;
+
+  int get totalPersonas {
+    return registros.fold<int>(0, (acc, r) => acc + r.cantidadPersonas);
+  }
+}
+
+class _RegistrosComidaAgrupadosDialog extends StatefulWidget {
+  const _RegistrosComidaAgrupadosDialog({
+    required this.sedeSeleccionada,
+    required this.sedes,
+    required this.cargos,
+    required this.apiClient,
+    required this.onReload,
+  });
+
+  final Sede sedeSeleccionada;
+  final List<Sede> sedes;
+  final List<_CargoConfig> cargos;
+  final ApiClient apiClient;
+  final Future<void> Function() onReload;
+
+  @override
+  State<_RegistrosComidaAgrupadosDialog> createState() =>
+      _RegistrosComidaAgrupadosDialogState();
+}
+
+class _RegistrosComidaAgrupadosDialogState
+    extends State<_RegistrosComidaAgrupadosDialog> {
+  bool _cargando = true;
+  String? _error;
+  List<_RegistroComida> _registros = const [];
+  List<_RegistroComidaGrupo> _grupos = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarRegistros();
+  }
+
+  Future<void> _cargarRegistros() async {
+    setState(() {
+      _cargando = true;
+      _error = null;
+    });
+
+    try {
+        final data = await widget.apiClient.getJsonList(
+          '/platos/registros-comida',
+          query: {'limit': '500'},
+      );
+
+      final registros = data
+          .map((e) => _RegistroComida.fromJson(e as Map<String, dynamic>))
+          .toList();
+
+      final grupos = _agruparRegistrosComida(registros);
+
+      if (!mounted) return;
+      setState(() {
+        _registros = registros;
+        _grupos = grupos;
+        _cargando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _cargando = false;
+        _error = 'Error al cargar registros: $e';
+        _registros = const [];
+        _grupos = const [];
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Registro de platos agrupado'),
+      content: SizedBox(
+        width: 980,
+        height: 620,
+        child: _buildContenido(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _cargando ? null : _cargarRegistros,
+          child: const Text('Actualizar'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cerrar'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContenido() {
+    if (_cargando) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Text(
+          _error!,
+          style: const TextStyle(color: Colors.red),
+        ),
+      );
+    }
+
+    if (_grupos.isEmpty) {
+      return const Center(
+            child: Text('No hay registros de platos para mostrar.'),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+            Text(
+              'Mostrando registros de todas las sedes',
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: ListView.separated(
+            itemCount: _grupos.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final grupo = _grupos[index];
+              return Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${_formatFechaHora(grupo.fechaHora)} • ${_tipoComidaTexto(grupo.tipoComida)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Sede: ${_sedeTexto(grupo.sedeId)}',
+                              style: TextStyle(color: Colors.grey.shade700),
+                            ),
+                            Text(
+                              'Cargos: ${grupo.registros.length} • Personas: ${grupo.totalPersonas}',
+                              style: TextStyle(color: Colors.grey.shade700),
+                            ),
+                          ],
+                        ),
+                      ),
+                      FilledButton.icon(
+                        onPressed: () => _abrirEditorGrupo(grupo),
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Modificar'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _abrirEditorGrupo(_RegistroComidaGrupo grupo) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return _EditarGrupoRegistroDialog(
+          grupo: grupo,
+          sedes: widget.sedes,
+          cargos: widget.cargos,
+          apiClient: widget.apiClient,
+          onSaved: () async {
+            await widget.onReload();
+            await _cargarRegistros();
+          },
+        );
+      },
+    );
+  }
+
+  String _sedeTexto(String sedeId) {
+    for (final sede in widget.sedes) {
+      if (sede.id == sedeId) return sede.nombre;
+    }
+    return sedeId;
+  }
+
+  String _tipoComidaTexto(String tipoId) {
+    final limpio = tipoId.replaceAll('_', ' ').toLowerCase();
+    if (limpio.isEmpty) return tipoId;
+    return limpio[0].toUpperCase() + limpio.substring(1);
+  }
+}
+
+class _DetalleRegistroEditable {
+  _DetalleRegistroEditable({required _RegistroComida registro})
+      : id = registro.id,
+        cargoId = registro.cargoId,
+        cantidadController = TextEditingController(
+          text: registro.cantidadPersonas.toString(),
+        );
+
+  final String id;
+  String cargoId;
+  final TextEditingController cantidadController;
+
+  void dispose() {
+    cantidadController.dispose();
+  }
+}
+
+class _EditarGrupoRegistroDialog extends StatefulWidget {
+  const _EditarGrupoRegistroDialog({
+    required this.grupo,
+    required this.sedes,
+    required this.cargos,
+    required this.apiClient,
+    required this.onSaved,
+  });
+
+  final _RegistroComidaGrupo grupo;
+  final List<Sede> sedes;
+  final List<_CargoConfig> cargos;
+  final ApiClient apiClient;
+  final Future<void> Function() onSaved;
+
+  @override
+  State<_EditarGrupoRegistroDialog> createState() => _EditarGrupoRegistroDialogState();
+}
+
+class _EditarGrupoRegistroDialogState extends State<_EditarGrupoRegistroDialog> {
+  late DateTime _fecha;
+  late String _sedeId;
+  late String _tipoComida;
+  late List<_DetalleRegistroEditable> _detalles;
+
+  bool _guardando = false;
+  bool _cargandoTipos = true;
+  List<_TipoPlato> _tipos = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fecha = widget.grupo.fechaHora;
+    _sedeId = widget.grupo.sedeId;
+    _tipoComida = widget.grupo.tipoComida;
+    _detalles = [for (final r in widget.grupo.registros) _DetalleRegistroEditable(registro: r)];
+    _cargarTipos();
+  }
+
+  @override
+  void dispose() {
+    for (final d in _detalles) {
+      d.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _cargarTipos() async {
+    setState(() {
+      _cargandoTipos = true;
+    });
+
+    try {
+      final data = await widget.apiClient.getJsonList('/tipos-platos');
+      final tipos = data
+          .map((e) => _TipoPlato(
+                id: e['id'] as String,
+                nombre: e['nombre'] as String,
+                activo: (e['activo'] as bool?) ?? true,
+              ))
+          .where((t) => t.activo)
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        _tipos = tipos;
+        _cargandoTipos = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _tipos = const [];
+        _cargandoTipos = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Modificar registro agrupado'),
+      content: SizedBox(
+        width: 950,
+        height: 620,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: _buildFechaField()),
+                const SizedBox(width: 12),
+                Expanded(child: _buildSedeField()),
+                const SizedBox(width: 12),
+                Expanded(child: _buildTipoComidaField()),
+              ],
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Cargos y cantidad de personas',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView.separated(
+                itemCount: _detalles.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final d = _detalles[index];
+                  final cargosDisponibles = _cargosDisponiblesPara(index);
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: cargosDisponibles.any((c) => c.id == d.cargoId)
+                              ? d.cargoId
+                              : null,
+                          decoration: const InputDecoration(
+                            labelText: 'Cargo',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: [
+                            for (final cargo in cargosDisponibles)
+                              DropdownMenuItem<String>(
+                                value: cargo.id,
+                                child: Text(cargo.nombre),
+                              ),
+                          ],
+                          onChanged: _guardando
+                              ? null
+                              : (value) {
+                                  if (value == null) return;
+                                  setState(() {
+                                    d.cargoId = value;
+                                  });
+                                },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 180,
+                        child: TextField(
+                          controller: d.cantidadController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Personas',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Eliminar cargo del registro',
+                        onPressed: _guardando ? null : () => _eliminarDetalle(index),
+                        icon: const Icon(Icons.delete_outline),
+                        color: Colors.red.shade700,
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: _guardando ? null : _eliminarRegistroCompleto,
+          icon: const Icon(Icons.delete),
+          label: const Text('Eliminar registro'),
+        ),
+        TextButton(
+          onPressed: _guardando ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton.icon(
+          onPressed: _guardando ? null : _guardarCambios,
+          icon: _guardando
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.save),
+          label: Text(_guardando ? 'Guardando...' : 'Guardar cambios'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFechaField() {
+    return InkWell(
+      onTap: _guardando
+          ? null
+          : () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _fecha,
+                firstDate: DateTime(2020),
+                lastDate: DateTime(2035),
+              );
+              if (picked == null) return;
+              setState(() {
+                _fecha = DateTime(
+                  picked.year,
+                  picked.month,
+                  picked.day,
+                  _fecha.hour,
+                  _fecha.minute,
+                  _fecha.second,
+                );
+              });
+            },
+      child: InputDecorator(
+        decoration: const InputDecoration(
+          labelText: 'Fecha',
+          border: OutlineInputBorder(),
+        ),
+        child: Text(_formatFechaHora(_fecha)),
+      ),
+    );
+  }
+
+  Widget _buildSedeField() {
+    return DropdownButtonFormField<Sede>(
+      initialValue: widget.sedes.firstWhere(
+        (s) => s.id == _sedeId,
+        orElse: () => widget.sedes.first,
+      ),
+      decoration: const InputDecoration(
+        labelText: 'Sede',
+        border: OutlineInputBorder(),
+      ),
+      items: [
+        for (final sede in widget.sedes)
+          DropdownMenuItem<Sede>(
+            value: sede,
+            child: Text(sede.nombre),
+          ),
+      ],
+      onChanged: _guardando
+          ? null
+          : (value) {
+              if (value == null) return;
+              setState(() {
+                _sedeId = value.id;
+              });
+            },
+    );
+  }
+
+  Widget _buildTipoComidaField() {
+    return DropdownButtonFormField<String>(
+      initialValue: _tipos.any((t) => t.id == _tipoComida) ? _tipoComida : null,
+      decoration: const InputDecoration(
+        labelText: 'Tipo de comida',
+        border: OutlineInputBorder(),
+      ),
+      items: [
+        for (final tipo in _tipos)
+          DropdownMenuItem<String>(
+            value: tipo.id,
+            child: Text(tipo.nombre),
+          ),
+      ],
+      onChanged: (_guardando || _cargandoTipos)
+          ? null
+          : (value) {
+              if (value == null) return;
+              setState(() {
+                _tipoComida = value;
+              });
+            },
+    );
+  }
+
+  Future<void> _guardarCambios() async {
+    if (_detalles.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay cargos en este registro para guardar.')),
+      );
+      return;
+    }
+
+    final idsSeleccionados = _detalles.map((d) => d.cargoId).toList();
+    if (idsSeleccionados.toSet().length != idsSeleccionados.length) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se permiten cargos repetidos en el mismo registro.')),
+      );
+      return;
+    }
+
+    for (final detalle in _detalles) {
+      final cantidad = int.tryParse(detalle.cantidadController.text.trim());
+      if (cantidad == null || cantidad <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Todas las cantidades deben ser números mayores a 0.'),
+          ),
+        );
+        return;
+      }
+    }
+
+    setState(() {
+      _guardando = true;
+    });
+
+    try {
+      for (final detalle in _detalles) {
+        final cantidad = int.parse(detalle.cantidadController.text.trim());
+        await widget.apiClient.putJson(
+          '/platos/registros-comida/${detalle.id}',
+          {
+            'fecha': _fecha.toIso8601String(),
+            'sedeId': _sedeId,
+            'tipoComida': _tipoComida,
+            'cargoId': detalle.cargoId,
+            'cantidadPersonas': cantidad,
+            'observaciones': null,
+          },
+        );
+      }
+
+      await widget.onSaved();
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registro agrupado actualizado correctamente.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al actualizar el registro agrupado: $e')),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _guardando = false;
+      });
+    }
+  }
+
+  List<_CargoConfig> _cargosDisponiblesPara(int index) {
+    final actual = _detalles[index];
+    final usadosPorOtros = <String>{};
+    for (var i = 0; i < _detalles.length; i++) {
+      if (i == index) continue;
+      usadosPorOtros.add(_detalles[i].cargoId);
+    }
+
+    final activos = widget.cargos.where((c) => c.tipo != 0);
+    return activos
+        .where((c) => c.id == actual.cargoId || !usadosPorOtros.contains(c.id))
+        .toList();
+  }
+
+  Future<void> _eliminarDetalle(int index) async {
+    final detalle = _detalles[index];
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminar cargo del registro'),
+          content: const Text('Se eliminará este cargo del registro agrupado. ¿Deseas continuar?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Eliminar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmado != true) return;
+
+    setState(() {
+      _guardando = true;
+    });
+
+    try {
+      await widget.apiClient.deleteJson('/platos/registros-comida/${detalle.id}');
+
+      if (!mounted) return;
+      setState(() {
+        detalle.dispose();
+        _detalles.removeAt(index);
+      });
+
+      await widget.onSaved();
+
+      if (!mounted) return;
+      if (_detalles.isEmpty) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Se eliminó el último cargo del registro.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cargo eliminado del registro.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al eliminar cargo del registro: $e')),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _guardando = false;
+      });
+    }
+  }
+
+  Future<void> _eliminarRegistroCompleto() async {
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminar registro completo'),
+          content: const Text(
+            'Se eliminarán todos los cargos de este registro agrupado. Esta acción no se puede deshacer.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Eliminar todo'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmado != true) return;
+
+    setState(() {
+      _guardando = true;
+    });
+
+    try {
+      final ids = [for (final d in _detalles) d.id];
+      for (final id in ids) {
+        await widget.apiClient.deleteJson('/platos/registros-comida/$id');
+      }
+
+      await widget.onSaved();
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registro agrupado eliminado correctamente.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al eliminar registro: $e')),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _guardando = false;
+      });
+    }
+  }
+}
+
+List<_RegistroComidaGrupo> _agruparRegistrosComida(List<_RegistroComida> registros) {
+  final map = <String, List<_RegistroComida>>{};
+
+  for (final r in registros) {
+    final truncada = DateTime(
+      r.fecha.year,
+      r.fecha.month,
+      r.fecha.day,
+      r.fecha.hour,
+      r.fecha.minute,
+    );
+    final key = '${truncada.toIso8601String()}|${r.sedeId}|${r.tipoComida}';
+    map.putIfAbsent(key, () => []).add(r);
+  }
+
+  final grupos = <_RegistroComidaGrupo>[];
+  for (final entry in map.entries) {
+    final list = entry.value;
+    if (list.isEmpty) continue;
+    final base = list.first;
+    grupos.add(
+      _RegistroComidaGrupo(
+        fechaHora: DateTime(
+          base.fecha.year,
+          base.fecha.month,
+          base.fecha.day,
+          base.fecha.hour,
+          base.fecha.minute,
+        ),
+        sedeId: base.sedeId,
+        tipoComida: base.tipoComida,
+        registros: list,
+      ),
+    );
+  }
+
+  grupos.sort((a, b) => b.fechaHora.compareTo(a.fechaHora));
+  return grupos;
+}
+
+String _formatFechaHora(DateTime fecha) {
+  final yyyy = fecha.year.toString().padLeft(4, '0');
+  final mm = fecha.month.toString().padLeft(2, '0');
+  final dd = fecha.day.toString().padLeft(2, '0');
+  final hh = fecha.hour.toString().padLeft(2, '0');
+  final mi = fecha.minute.toString().padLeft(2, '0');
+  return '$yyyy-$mm-$dd $hh:$mi';
 }
 
 class _CargoConfig {
@@ -776,7 +1652,7 @@ class _EditarCargosDialogState extends State<_EditarCargosDialog> {
                               SizedBox(
                                 width: 220,
                                 child: DropdownButtonFormField<int>(
-                                  value: editable.eliminado
+                                  initialValue: editable.eliminado
                                       ? 0
                                       : (editable.tipo == 2 || editable.tipo == 1
                                           ? editable.tipo
@@ -1278,7 +2154,7 @@ class _RegistroStepper extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: cargo.isEmpty ? null : cargo,
+                      initialValue: cargo.isEmpty ? null : cargo,
                       decoration: const InputDecoration(
                         labelText: 'Cargo',
                         border: OutlineInputBorder(),
@@ -1357,7 +2233,7 @@ class _RegistroStepper extends StatelessWidget {
                               Expanded(
                                 flex: 3,
                                 child: DropdownButtonFormField<String>(
-                                  value: ingredientesSeleccionados[i].productoId,
+                                  initialValue: ingredientesSeleccionados[i].productoId,
                                   decoration: const InputDecoration(
                                     labelText: 'Ingrediente',
                                     border: OutlineInputBorder(),
@@ -1762,7 +2638,7 @@ class _RegistrarComidaDialogState extends State<_RegistrarComidaDialog> {
         ),
         const SizedBox(height: 16),
         DropdownButtonFormField<Sede>(
-          value: _sedeSeleccionada,
+          initialValue: _sedeSeleccionada,
           decoration: const InputDecoration(
             labelText: 'Sede del registro',
             border: OutlineInputBorder(),
@@ -1790,7 +2666,7 @@ class _RegistrarComidaDialogState extends State<_RegistrarComidaDialog> {
           )
         else
           DropdownButtonFormField<_TipoPlato>(
-            value: _tipoSeleccionado,
+            initialValue: _tipoSeleccionado,
             decoration: const InputDecoration(
               labelText: 'Tipo de comida',
               border: OutlineInputBorder(),
@@ -2148,8 +3024,8 @@ class _PlatosRecientesCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                        child: Row(
-                          children: const [
+                        child: const Row(
+                          children: [
                             Expanded(
                               flex: 2,
                               child: Text(
@@ -2312,10 +3188,10 @@ class _RegistroInfoCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 16),
-            Expanded(
+            const Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
+                children: [
                   Text(
                     'Registro de Platos',
                     style: TextStyle(

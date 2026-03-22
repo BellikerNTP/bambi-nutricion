@@ -1,0 +1,6 @@
+Launching lib\main.dart on Windows in debug mode...
+Error: Building with plugins requires symlink support.
+
+Please enable Developer Mode in your system settings. Run
+  start ms-settings:developers
+to open settings.

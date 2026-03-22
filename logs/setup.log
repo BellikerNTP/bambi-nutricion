@@ -1,0 +1,37 @@
+Requirement already satisfied: pymongo>=4.6.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from -r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 1)) (4.12.0)
+Requirement already satisfied: python-dotenv>=1.0.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from -r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 2)) (1.2.1)
+Requirement already satisfied: fastapi>=0.110.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from -r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (0.133.1)
+Requirement already satisfied: uvicorn>=0.27.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from uvicorn[standard]>=0.27.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 4)) (0.41.0)
+Requirement already satisfied: dnspython<3.0.0,>=1.16.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from pymongo>=4.6.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 1)) (2.7.0)
+Requirement already satisfied: starlette>=0.40.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from fastapi>=0.110.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (0.52.1)
+Requirement already satisfied: pydantic>=2.7.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from fastapi>=0.110.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (2.12.5)
+Requirement already satisfied: typing-extensions>=4.8.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from fastapi>=0.110.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (4.15.0)
+Requirement already satisfied: typing-inspection>=0.4.2 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from fastapi>=0.110.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (0.4.2)
+Requirement already satisfied: annotated-doc>=0.0.2 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from fastapi>=0.110.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (0.0.4)
+Requirement already satisfied: click>=7.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from uvicorn>=0.27.0->uvicorn[standard]>=0.27.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 4)) (8.2.0)
+Requirement already satisfied: h11>=0.8 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from uvicorn>=0.27.0->uvicorn[standard]>=0.27.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 4)) (0.16.0)
+Requirement already satisfied: colorama>=0.4 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from uvicorn[standard]>=0.27.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 4)) (0.4.6)
+Requirement already satisfied: httptools>=0.6.3 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from uvicorn[standard]>=0.27.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 4)) (0.7.1)
+Requirement already satisfied: pyyaml>=5.1 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from uvicorn[standard]>=0.27.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 4)) (6.0.2)
+Requirement already satisfied: watchfiles>=0.20 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from uvicorn[standard]>=0.27.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 4)) (1.1.1)
+Requirement already satisfied: websockets>=10.4 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from uvicorn[standard]>=0.27.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 4)) (16.0)
+Requirement already satisfied: annotated-types>=0.6.0 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from pydantic>=2.7.0->fastapi>=0.110.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (0.7.0)
+Requirement already satisfied: pydantic-core==2.41.5 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from pydantic>=2.7.0->fastapi>=0.110.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (2.41.5)
+Requirement already satisfied: anyio<5,>=3.6.2 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from starlette>=0.40.0->fastapi>=0.110.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (4.12.1)
+Requirement already satisfied: idna>=2.8 in c:\users\victo\appdata\local\programs\python\python313\lib\site-packages (from anyio<5,>=3.6.2->starlette>=0.40.0->fastapi>=0.110.0->-r C:\Users\victo\Desktop\Bambi_1.4\bambi-nutricion\backend\requirements.txt (line 3)) (3.10)
+
+[notice] A new release of pip is available: 25.0.1 -> 26.0.1
+[notice] To update, run: python.exe -m pip install --upgrade pip
+Resolving dependencies...
+Downloading packages...
+  fl_chart 0.69.2 (1.2.0 available)
+  flutter_hooks 0.20.5 (0.21.3+1 available)
+  flutter_lints 4.0.0 (6.0.0 available)
+  go_router 14.8.1 (17.1.0 available)
+  lints 4.0.0 (6.1.0 available)
+  matcher 0.12.18 (0.12.19 available)
+  meta 1.17.0 (1.18.2 available)
+  test_api 0.7.9 (0.7.10 available)
+Got dependencies!
+8 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
