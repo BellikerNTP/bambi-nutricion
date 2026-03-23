@@ -38,6 +38,8 @@ class _NutricionHomeState extends State<_NutricionHome> {
   Sede? _selectedSede;
   bool _cargandoSedes = true;
   String? _errorSedes;
+  bool _globalLoading = false;
+  OverlayEntry? _loadingOverlayEntry;
 
   @override
   void initState() {
@@ -96,6 +98,7 @@ class _NutricionHomeState extends State<_NutricionHome> {
           Sidebar(
             currentView: _currentView,
             onViewChange: (view) {
+              if (_globalLoading) return; // bloquear cambios mientras carga
               setState(() {
                 _currentView = view;
               });
@@ -109,6 +112,40 @@ class _NutricionHomeState extends State<_NutricionHome> {
     );
   }
 
+  void _setGlobalLoading(bool value) {
+    if (!mounted) return;
+
+    if (value) {
+      if (_globalLoading) return;
+      _globalLoading = true;
+
+      final overlay = Navigator.of(context, rootNavigator: true).overlay;
+      if (overlay == null) return;
+
+      _loadingOverlayEntry = OverlayEntry(
+        builder: (_) => Positioned.fill(
+          child: AbsorbPointer(
+            absorbing: true,
+            child: Container(
+              color: Colors.black.withOpacity(0.15),
+              child: const Center(
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          ),
+        ),
+      );
+      overlay.insert(_loadingOverlayEntry!);
+    } else {
+      if (!_globalLoading) return;
+      _globalLoading = false;
+      _loadingOverlayEntry?.remove();
+      _loadingOverlayEntry = null;
+    }
+
+    setState(() {});
+  }
+
   Widget _buildView() {
     switch (_currentView) {
       case ViewType.platos:
@@ -117,6 +154,7 @@ class _NutricionHomeState extends State<_NutricionHome> {
         return InventarioScreen(
           selectedSede: _selectedSede!,
           sedes: _sedes,
+          setGlobalLoading: _setGlobalLoading,
           onSedeChange: (sede) {
             setState(() {
               _selectedSede = sede;

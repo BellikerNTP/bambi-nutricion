@@ -9,11 +9,13 @@ class InventarioScreen extends StatefulWidget {
     super.key,
     required this.selectedSede,
     required this.sedes,
+    required this.setGlobalLoading,
     required this.onSedeChange,
   });
 
   final Sede selectedSede;
   final List<Sede> sedes;
+  final void Function(bool) setGlobalLoading;
   final ValueChanged<Sede> onSedeChange;
 
   @override
@@ -329,6 +331,7 @@ class _InventarioScreenState extends State<InventarioScreen>
           sedeId: sedeId,
           sedesDestino: sedesDestino,
           onSaved: _cargarDatosIniciales,
+          setGlobalLoading: widget.setGlobalLoading,
         );
       },
     );
@@ -1417,12 +1420,14 @@ class _NuevaTransaccionDialog extends StatefulWidget {
     required this.sedeId,
     required this.sedesDestino,
     required this.onSaved,
+    required this.setGlobalLoading,
   });
 
   final List<_Producto> productos;
   final String sedeId;
   final List<Sede> sedesDestino;
   final Future<void> Function() onSaved;
+  final void Function(bool) setGlobalLoading;
 
   @override
   State<_NuevaTransaccionDialog> createState() => _NuevaTransaccionDialogState();
@@ -1875,6 +1880,7 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
       }
 
       () async {
+        widget.setGlobalLoading(true);
         try {
           await Future.wait(movimientos);
 
@@ -1894,6 +1900,8 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error al registrar entradas: $e')),
           );
+        } finally {
+          widget.setGlobalLoading(false);
         }
       }();
     } else if (_tipo == 'transferencia') {
@@ -1917,6 +1925,7 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
       final sedeDestinoId = _sedeDestinoId!;
 
       () async {
+        widget.setGlobalLoading(true);
         try {
           int exitos = 0;
           int omitidos = 0;
@@ -1975,6 +1984,8 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error al registrar transferencia: $e')),
           );
+        } finally {
+          widget.setGlobalLoading(false);
         }
       }();
     } else if (_tipo == 'reabastecimiento') {
@@ -1989,6 +2000,7 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
       final sedeDestinoId = _sedeDestinoId!;
 
       () async {
+        widget.setGlobalLoading(true);
         try {
           final resp = await _apiClient.postJson(
             '/inventario/abastecer-stock-minimo',
@@ -2021,6 +2033,8 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error al registrar reabastecimiento: $e')),
           );
+        } finally {
+          widget.setGlobalLoading(false);
         }
       }();
     } else if (_tipo == 'ajuste') {
@@ -2073,6 +2087,7 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
       }
 
       () async {
+        widget.setGlobalLoading(true);
         try {
           await Future.wait(movimientos);
 
@@ -2092,6 +2107,8 @@ class _NuevaTransaccionDialogState extends State<_NuevaTransaccionDialog> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error al registrar ajustes: $e')),
           );
+        } finally {
+          widget.setGlobalLoading(false);
         }
       }();
     }

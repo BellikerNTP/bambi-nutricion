@@ -1851,6 +1851,7 @@ class _NuevoCargoDialogState extends State<_NuevoCargoDialog> {
   final TextEditingController _nombreController = TextEditingController();
   final TextEditingController _observacionesController = TextEditingController();
   final Set<String> _sedesSeleccionadas = {};
+  int _tipo = 1; // 1 = No Rendición, 2 = Rendición
   bool _guardando = false;
 
   @override
@@ -1870,12 +1871,46 @@ class _NuevoCargoDialogState extends State<_NuevoCargoDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: _nombreController,
-              decoration: const InputDecoration(
-                labelText: 'Nombre del cargo',
-                border: OutlineInputBorder(),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _nombreController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre del cargo',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 220,
+                  child: DropdownButtonFormField<int>(
+                    value: _tipo,
+                    decoration: const InputDecoration(
+                      labelText: 'Tipo de cargo',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 2,
+                        child: Text('Rendición'),
+                      ),
+                      DropdownMenuItem(
+                        value: 1,
+                        child: Text('No Rendición'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _tipo = value;
+                      });
+                    },
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             const Text('¿En qué sedes se cuenta este cargo?'),
@@ -1954,7 +1989,7 @@ class _NuevoCargoDialogState extends State<_NuevoCargoDialog> {
           '/cargos',
           {
             'nombre': nombre,
-            'tipo': 1,
+            'tipo': _tipo,
             'sedes': _sedesSeleccionadas.toList(),
             'observaciones': observaciones,
           },
