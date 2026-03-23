@@ -11,7 +11,7 @@ from datetime import datetime
 import re
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -27,6 +27,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    """Endpoint simple para comprobar que el backend está levantado."""
+
+    return {"status": "ok"}
+
+
+@app.post("/shutdown")
+async def shutdown(background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Apaga el servidor.
+
+    Solo se utiliza desde la app de escritorio (localhost).
+    """
+
+    import os
+    import time
+
+    def _stop() -> None:
+        # Pequeña espera para que la respuesta llegue al cliente
+        time.sleep(0.5)
+        os._exit(0)
+
+    background_tasks.add_task(_stop)
+    return {"status": "shutting down"}
 
 
 # -----------------
@@ -222,12 +248,6 @@ class ResumenPlatosPorTipoOut(BaseModel):
 # ---------
 # ENDPOINTS
 # ---------
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
-
 
 # SEDES
 

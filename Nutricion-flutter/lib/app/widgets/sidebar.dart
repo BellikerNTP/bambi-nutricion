@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../app_version.dart';
 
 enum ViewType { platos, inventario, reportes }
 
@@ -110,9 +111,9 @@ class Sidebar extends StatelessWidget {
           top: BorderSide(color: Color(0xFF15803D)),
         ),
       ),
-      child: const Text(
-        'Sistema de Gestión v1.0',
-        style: TextStyle(
+      child: Text(
+        'Sistema de Gestión v$appVersion',
+        style: const TextStyle(
           color: Color(0xFFA7F3D0),
           fontSize: 11,
         ),
