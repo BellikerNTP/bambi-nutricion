@@ -11,6 +11,7 @@ from datetime import datetime
 import re
 from typing import Any, Dict, List, Optional
 
+from bson import ObjectId
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -116,6 +117,7 @@ class MovimientoInventarioIn(BaseModel):
     productoId: str
     sedeId: str  # sede origen / sede donde se registra el movimiento
     cantidad: int = Field(0, description="Cantidad para entradas; se ignora en transferencias")
+    modoTransferencia: Optional[str] = None  # stock_minimo_destino | personalizada
     motivo: Optional[str] = None
     sedeOrigenId: Optional[str] = None
     sedeDestinoId: Optional[str] = None
@@ -130,6 +132,40 @@ class MovimientoInventarioOut(BaseModel):
     motivo: Optional[str] = None
     origen: Optional[str] = None
     destino: Optional[str] = None
+
+
+class AbastecerStockMinimoIn(BaseModel):
+    sedeId: str
+    sedeDestinoId: str
+    motivo: Optional[str] = None
+
+
+class AbastecerStockMinimoOut(BaseModel):
+    procesados: int
+    transferidos: int
+    omitidosStockMinimoCero: int
+    omitidosSinStockOrigen: int
+    omitidosCantidadTransferirCero: int
+
+
+class AbastecerStockMinimoResumenItem(BaseModel):
+    productoId: str
+    nombre: str
+    unidad: str
+    stockMinimoDestino: float
+    stockDisponibleOrigen: float
+    cantidadTransferir: float
+
+
+class AbastecerStockMinimoResumenOut(BaseModel):
+    sedeId: str
+    sedeDestinoId: str
+    totalProductosTransferir: int
+    totalCantidadTransferir: float
+    omitidosStockMinimoCero: int
+    omitidosSinStockOrigen: int
+    omitidosCantidadTransferirCero: int
+    items: List[AbastecerStockMinimoResumenItem]
 
 
 class IngredientePlato(BaseModel):
@@ -200,6 +236,27 @@ class RegistroComidaIn(BaseModel):
 
 class RegistroComidaResultado(BaseModel):
     insertados: int
+
+
+class RegistroComidaOut(BaseModel):
+    id: str
+    fecha: datetime
+    sedeId: str
+    tipoComida: str
+    cargoId: str
+    cantidadPersonas: int
+    observaciones: Optional[str] = None
+    registradoEl: Optional[datetime] = None
+    creadoEl: Optional[datetime] = None
+
+
+class RegistroComidaUpdateIn(BaseModel):
+    fecha: datetime
+    sedeId: str
+    tipoComida: str
+    cargoId: str
+    cantidadPersonas: int
+    observaciones: Optional[str] = None
 
 
 class CategoriaPlatosSede(BaseModel):
@@ -691,27 +748,6 @@ def registrar_movimiento_inventario(payload: MovimientoInventarioIn):
         if sede_origen == sede_destino:
             raise HTTPException(status_code=400, detail="La sede origen y destino no pueden ser la misma")
 
-        # Stock mínimo requerido en la sede destino
-        stock_min_destino = _stock_min_for_sede(prod, sede_destino)
-        if stock_min_destino <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail="No hay stock mínimo configurado para la sede destino",
-            )
-
-        inv_destino = inventario_col.find_one({
-            "sedeId": sede_destino,
-            "productoId": payload.productoId,
-        }) or {}
-        cantidad_destino = float(inv_destino.get("cantidadActual", 0))
-
-        faltante = stock_min_destino - cantidad_destino
-        if faltante <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail="La sede destino ya cumple o supera el stock mínimo para este producto",
-            )
-
         inv_origen = inventario_col.find_one({
             "sedeId": sede_origen,
             "productoId": payload.productoId,
@@ -724,7 +760,45 @@ def registrar_movimiento_inventario(payload: MovimientoInventarioIn):
                 detail="No hay inventario disponible en la sede origen para este producto",
             )
 
-        cantidad_transferir = min(faltante, cantidad_origen)
+        modo_transferencia = payload.modoTransferencia or "stock_minimo_destino"
+
+        inv_destino = inventario_col.find_one({
+            "sedeId": sede_destino,
+            "productoId": payload.productoId,
+        }) or {}
+        cantidad_destino = float(inv_destino.get("cantidadActual", 0))
+
+        stock_min_destino = _stock_min_for_sede(prod, sede_destino)
+
+        if modo_transferencia == "personalizada":
+            if payload.cantidad <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="La cantidad personalizada debe ser mayor a 0",
+                )
+            if float(payload.cantidad) > cantidad_origen:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No hay suficiente stock en la sede origen para la cantidad solicitada",
+                )
+            cantidad_transferir = float(payload.cantidad)
+        else:
+            # Modo por defecto: abastecer al stock mínimo de destino según faltante
+            if stock_min_destino <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No hay stock mínimo configurado para la sede destino",
+                )
+
+            faltante = stock_min_destino - cantidad_destino
+            if faltante <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="La sede destino ya cumple o supera el stock mínimo para este producto",
+                )
+
+            cantidad_transferir = min(faltante, cantidad_origen)
+
         if cantidad_transferir <= 0:
             raise HTTPException(
                 status_code=400,
@@ -875,6 +949,201 @@ def registrar_movimiento_inventario(payload: MovimientoInventarioIn):
         )
 
     raise HTTPException(status_code=400, detail="Tipo de movimiento no válido (solo entrada, transferencia o ajuste)")
+
+
+@app.post("/inventario/abastecer-stock-minimo", response_model=AbastecerStockMinimoOut)
+def abastecer_stock_minimo(payload: AbastecerStockMinimoIn) -> AbastecerStockMinimoOut:
+    """Transfiere productos a una sede destino usando su stock mínimo configurado.
+
+    Reglas:
+    - Omite productos cuyo stock mínimo en destino sea 0.
+    - La cantidad a transferir por producto es el stock mínimo de la sede destino.
+    - Si origen no tiene suficiente, transfiere lo disponible.
+    """
+
+    sede_origen = payload.sedeId
+    sede_destino = payload.sedeDestinoId
+    if sede_origen == sede_destino:
+        raise HTTPException(status_code=400, detail="La sede origen y destino no pueden ser la misma")
+
+    productos_col = get_collection("productos")
+    inventario_col = get_collection("inventario_sedes")
+    historial_col = get_collection("inventario_historial")
+
+    fecha = datetime.utcnow()
+    procesados = 0
+    transferidos = 0
+    omitidos_stock_minimo_cero = 0
+    omitidos_sin_stock_origen = 0
+    omitidos_cantidad_transferir_cero = 0
+
+    productos = list(productos_col.find({}))
+    for prod in productos:
+        producto_id = str(prod.get("_id", ""))
+        if not producto_id:
+            continue
+
+        stock_min_destino = _stock_min_for_sede(prod, sede_destino)
+        if stock_min_destino <= 0:
+            omitidos_stock_minimo_cero += 1
+            continue
+
+        inv_origen = inventario_col.find_one({"sedeId": sede_origen, "productoId": producto_id}) or {}
+        cantidad_origen = float(inv_origen.get("cantidadActual", 0))
+        if cantidad_origen <= 0:
+            omitidos_sin_stock_origen += 1
+            continue
+
+        cantidad_transferir = min(float(stock_min_destino), cantidad_origen)
+        if cantidad_transferir <= 0:
+            omitidos_cantidad_transferir_cero += 1
+            continue
+
+        procesados += 1
+
+        nueva_cantidad_origen = max(0.0, cantidad_origen - cantidad_transferir)
+        stock_min_origen = _stock_min_for_sede(prod, sede_origen)
+        nuevo_estado_origen = (
+            "STOCK_BAJO" if stock_min_origen > 0 and nueva_cantidad_origen < stock_min_origen else "NORMAL"
+        )
+
+        inventario_col.update_one(
+            {"sedeId": sede_origen, "productoId": producto_id},
+            {
+                "$set": {
+                    "cantidadActual": nueva_cantidad_origen,
+                    "estado": nuevo_estado_origen,
+                    "actualizadoEn": fecha,
+                }
+            },
+            upsert=True,
+        )
+
+        inv_destino = inventario_col.find_one({"sedeId": sede_destino, "productoId": producto_id}) or {}
+        cantidad_destino = float(inv_destino.get("cantidadActual", 0))
+        nueva_cantidad_destino = cantidad_destino + cantidad_transferir
+        nuevo_estado_destino = (
+            "STOCK_BAJO" if stock_min_destino > 0 and nueva_cantidad_destino < stock_min_destino else "NORMAL"
+        )
+
+        inventario_col.update_one(
+            {"sedeId": sede_destino, "productoId": producto_id},
+            {
+                "$set": {
+                    "cantidadActual": nueva_cantidad_destino,
+                    "estado": nuevo_estado_destino,
+                    "actualizadoEn": fecha,
+                }
+            },
+            upsert=True,
+        )
+
+        motivo_base = payload.motivo or "Abastecer stock mínimo de sede destino"
+
+        historial_col.insert_one(
+            {
+                "fecha": fecha,
+                "tipo": "salida",
+                "productoId": producto_id,
+                "sedeId": sede_origen,
+                "cantidad": float(cantidad_transferir),
+                "sedeOrigenId": sede_origen,
+                "sedeDestinoId": sede_destino,
+                "motivo": motivo_base,
+                "creadoEn": fecha,
+            }
+        )
+
+        historial_col.insert_one(
+            {
+                "fecha": fecha,
+                "tipo": "entrada",
+                "productoId": producto_id,
+                "sedeId": sede_destino,
+                "cantidad": float(cantidad_transferir),
+                "sedeOrigenId": sede_origen,
+                "sedeDestinoId": sede_destino,
+                "motivo": motivo_base,
+                "creadoEn": fecha,
+            }
+        )
+
+        transferidos += 1
+
+    return AbastecerStockMinimoOut(
+        procesados=procesados,
+        transferidos=transferidos,
+        omitidosStockMinimoCero=omitidos_stock_minimo_cero,
+        omitidosSinStockOrigen=omitidos_sin_stock_origen,
+        omitidosCantidadTransferirCero=omitidos_cantidad_transferir_cero,
+    )
+
+
+@app.post(
+    "/inventario/abastecer-stock-minimo/resumen",
+    response_model=AbastecerStockMinimoResumenOut,
+)
+def resumen_abastecer_stock_minimo(payload: AbastecerStockMinimoIn) -> AbastecerStockMinimoResumenOut:
+    """Devuelve el resumen de cantidades a transferir sin ejecutar movimientos."""
+
+    sede_origen = payload.sedeId
+    sede_destino = payload.sedeDestinoId
+    if sede_origen == sede_destino:
+        raise HTTPException(status_code=400, detail="La sede origen y destino no pueden ser la misma")
+
+    productos_col = get_collection("productos")
+    inventario_col = get_collection("inventario_sedes")
+
+    omitidos_stock_minimo_cero = 0
+    omitidos_sin_stock_origen = 0
+    omitidos_cantidad_transferir_cero = 0
+    items: List[AbastecerStockMinimoResumenItem] = []
+
+    productos = list(productos_col.find({}))
+    for prod in productos:
+        producto_id = str(prod.get("_id", ""))
+        if not producto_id:
+            continue
+
+        stock_min_destino = _stock_min_for_sede(prod, sede_destino)
+        if stock_min_destino <= 0:
+            omitidos_stock_minimo_cero += 1
+            continue
+
+        inv_origen = inventario_col.find_one({"sedeId": sede_origen, "productoId": producto_id}) or {}
+        cantidad_origen = float(inv_origen.get("cantidadActual", 0))
+        if cantidad_origen <= 0:
+            omitidos_sin_stock_origen += 1
+            continue
+
+        cantidad_transferir = min(float(stock_min_destino), cantidad_origen)
+        if cantidad_transferir <= 0:
+            omitidos_cantidad_transferir_cero += 1
+            continue
+
+        items.append(
+            AbastecerStockMinimoResumenItem(
+                productoId=producto_id,
+                nombre=str(prod.get("nombre", producto_id)),
+                unidad=str(prod.get("unidad", "u")),
+                stockMinimoDestino=float(stock_min_destino),
+                stockDisponibleOrigen=float(cantidad_origen),
+                cantidadTransferir=float(cantidad_transferir),
+            )
+        )
+
+    total_cantidad = sum(i.cantidadTransferir for i in items)
+
+    return AbastecerStockMinimoResumenOut(
+        sedeId=sede_origen,
+        sedeDestinoId=sede_destino,
+        totalProductosTransferir=len(items),
+        totalCantidadTransferir=float(total_cantidad),
+        omitidosStockMinimoCero=omitidos_stock_minimo_cero,
+        omitidosSinStockOrigen=omitidos_sin_stock_origen,
+        omitidosCantidadTransferirCero=omitidos_cantidad_transferir_cero,
+        items=items,
+    )
 
 
 # PLATOS SERVIDOS
@@ -1069,6 +1338,124 @@ def registrar_comida_por_cargos(payload: RegistroComidaIn) -> RegistroComidaResu
     result = platos_col.insert_many(documentos)
 
     return RegistroComidaResultado(insertados=len(result.inserted_ids))
+
+
+@app.get("/platos/registros-comida", response_model=List[RegistroComidaOut])
+def listar_registros_comida(
+    sedeId: Optional[str] = Query(None, alias="sedeId"),
+    limit: int = Query(100, ge=1, le=500),
+) -> List[RegistroComidaOut]:
+    """Lista registros de comida para edición.
+
+    Solo incluye documentos del flujo "registrar-comida" que tienen tipoComida.
+    """
+
+    platos_col = get_collection("platos_historial")
+
+    query: Dict[str, Any] = {"tipoComida": {"$exists": True}}
+    if sedeId:
+        query["sedeId"] = sedeId
+
+    docs = list(platos_col.find(query).sort("fecha", -1).limit(limit))
+
+    resultados: List[RegistroComidaOut] = []
+    for d in docs:
+        fecha = d.get("fecha") or d.get("registradoEl") or d.get("creadoEl") or datetime.utcnow()
+        resultados.append(
+            RegistroComidaOut(
+                id=str(d.get("_id")),
+                fecha=fecha,
+                sedeId=str(d.get("sedeId", "")),
+                tipoComida=str(d.get("tipoComida", "")),
+                cargoId=str(d.get("cargoId", "")),
+                cantidadPersonas=int(d.get("cantidadPersonas", 0)),
+                observaciones=d.get("observaciones"),
+                registradoEl=d.get("registradoEl"),
+                creadoEl=d.get("creadoEl"),
+            )
+        )
+
+    return resultados
+
+
+@app.put("/platos/registros-comida/{registro_id}", response_model=RegistroComidaOut)
+def actualizar_registro_comida(registro_id: str, payload: RegistroComidaUpdateIn) -> RegistroComidaOut:
+    if payload.cantidadPersonas <= 0:
+        raise HTTPException(status_code=400, detail="La cantidad de personas debe ser mayor a 0")
+
+    try:
+        mongo_id = ObjectId(registro_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de registro inválido")
+
+    platos_col = get_collection("platos_historial")
+    tipos_col = get_collection("tipos_platos")
+    cargos_col = get_collection("cargos")
+    sedes_col = get_collection("sedes")
+
+    existente = platos_col.find_one({"_id": mongo_id})
+    if not existente:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+
+    if not tipos_col.find_one({"_id": payload.tipoComida}):
+        raise HTTPException(status_code=400, detail="Tipo de comida no válido")
+
+    if not cargos_col.find_one({"_id": payload.cargoId}):
+        raise HTTPException(status_code=400, detail="Cargo no válido")
+
+    if not sedes_col.find_one({"_id": payload.sedeId}):
+        raise HTTPException(status_code=400, detail="Sede no válida")
+
+    update_doc = {
+        "fecha": payload.fecha,
+        "sedeId": payload.sedeId,
+        "tipoComida": payload.tipoComida,
+        "cargoId": payload.cargoId,
+        "cantidadPersonas": int(payload.cantidadPersonas),
+        "observaciones": payload.observaciones,
+        "registradoEl": payload.fecha,
+    }
+
+    platos_col.update_one({"_id": mongo_id}, {"$set": update_doc})
+
+    actualizado = platos_col.find_one({"_id": mongo_id})
+    if not actualizado:
+        raise HTTPException(status_code=404, detail="Registro no encontrado luego de actualizar")
+
+    fecha = (
+        actualizado.get("fecha")
+        or actualizado.get("registradoEl")
+        or actualizado.get("creadoEl")
+        or datetime.utcnow()
+    )
+
+    return RegistroComidaOut(
+        id=str(actualizado.get("_id")),
+        fecha=fecha,
+        sedeId=str(actualizado.get("sedeId", "")),
+        tipoComida=str(actualizado.get("tipoComida", "")),
+        cargoId=str(actualizado.get("cargoId", "")),
+        cantidadPersonas=int(actualizado.get("cantidadPersonas", 0)),
+        observaciones=actualizado.get("observaciones"),
+        registradoEl=actualizado.get("registradoEl"),
+        creadoEl=actualizado.get("creadoEl"),
+    )
+
+
+@app.delete("/platos/registros-comida/{registro_id}")
+def eliminar_registro_comida(registro_id: str) -> Dict[str, Any]:
+    try:
+        mongo_id = ObjectId(registro_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID de registro inválido")
+
+    platos_col = get_collection("platos_historial")
+    result = platos_col.delete_one({"_id": mongo_id})
+
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+
+    return {"deleted": True, "id": registro_id}
 
 
 def _categoria_para_cargo(cargo_id: str, tipo: int | None) -> tuple[Optional[str], Optional[str]]:

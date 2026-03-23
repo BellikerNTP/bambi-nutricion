@@ -111,4 +111,28 @@ class ApiClient {
 
     throw ApiException(message);
   }
+
+  Future<Map<String, dynamic>> deleteJson(String path,
+      {Map<String, String>? query}) async {
+    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
+    final resp = await _client.delete(uri);
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      if (resp.body.trim().isEmpty) {
+        return <String, dynamic>{'ok': true};
+      }
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      throw Exception('Respuesta inesperada (se esperaba objeto)');
+    }
+
+    String message = 'Error ${resp.statusCode} al llamar $path';
+    try {
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map<String, dynamic> && decoded['detail'] != null) {
+        message = decoded['detail'].toString();
+      }
+    } catch (_) {}
+
+    throw ApiException(message);
+  }
 }
