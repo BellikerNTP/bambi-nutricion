@@ -302,6 +302,30 @@ class ResumenPlatosPorTipoOut(BaseModel):
     totalPorSede: List[TotalPlatosPorSede]
 
 
+class TipoPlatoCategoriaSedeResumen(BaseModel):
+    sedeId: str
+    cantidad: int
+
+
+class TipoPlatoCategoriaResumen(BaseModel):
+    codigo: str
+    nombre: str
+    total: int
+    porSede: List[TipoPlatoCategoriaSedeResumen]
+
+
+class TipoPlatoConCategoriasResumen(BaseModel):
+    codigo: str
+    nombre: str
+    categorias: List[TipoPlatoCategoriaResumen]
+
+
+class ResumenPlatosPorTipoYCargoOut(BaseModel):
+    desde: datetime
+    hasta: datetime
+    tipos: List[TipoPlatoConCategoriasResumen]
+
+
 # ---------
 # ENDPOINTS
 # ---------
@@ -1656,4 +1680,137 @@ def resumen_platos_por_tipo(
         tipos=tipos_resumen,
         totalGeneral=int(total_general),
         totalPorSede=total_por_sede_list,
+    )
+
+
+@app.get("/reportes/platos-por-tipo-y-cargo", response_model=ResumenPlatosPorTipoYCargoOut)
+def resumen_platos_por_tipo_y_cargo(
+    desde: datetime = Query(..., alias="desde"),
+    hasta: datetime = Query(..., alias="hasta"),
+) -> ResumenPlatosPorTipoYCargoOut:
+    """Resumen de platos servidos por tipo de plato, categoría de cargo y sede.
+
+    Para cada tipo de plato (desayuno, almuerzo, etc.) se detalla cuántas
+    personas comieron de cada categoría de cargo (Niños, Tías, Personas
+    Rendición, Personas no Rendición) en cada sede.
+    """
+
+    if hasta < desde:
+        raise HTTPException(status_code=400, detail="La fecha 'hasta' no puede ser menor que 'desde'")
+
+    platos_col = get_collection("platos_historial")
+    cargos_col = get_collection("cargos")
+    tipos_col = get_collection("tipos_platos")
+
+    # Mapa de cargos para conocer su tipo
+    cargos_docs = list(cargos_col.find({}))
+    cargos_info: dict[str, int] = {}
+    for c in cargos_docs:
+        cid = c.get("_id")
+        if not cid:
+            continue
+        try:
+            cargos_info[str(cid)] = int(c.get("tipo", 1))
+        except (TypeError, ValueError):
+            cargos_info[str(cid)] = 1
+
+    # Nombres de tipos de plato
+    tipos_docs = list(tipos_col.find({}))
+    tipos_nombres: dict[str, str] = {}
+    for t in tipos_docs:
+        tid = t.get("_id")
+        if not tid:
+            continue
+        tipos_nombres[str(tid)] = str(t.get("nombre", tid))
+
+    # Estructura: tipo_id -> categoria_codigo -> {"nombre": str, "total": int, "porSede": {sedeId: int}}
+    datos: dict[str, dict[str, dict[str, Any]]] = {}
+
+    docs = list(
+        platos_col.find({"fecha": {"$gte": desde, "$lte": hasta}})
+    )
+
+    for d in docs:
+        tipo_id = str(d.get("tipoComida", ""))
+        sede_id = str(d.get("sedeId", ""))
+        cargo_id = str(d.get("cargoId", ""))
+        try:
+            cantidad = int(d.get("cantidadPersonas", 0))
+        except (TypeError, ValueError):
+            continue
+
+        if not tipo_id or not sede_id or not cargo_id or cantidad <= 0:
+            continue
+
+        tipo_cargo = cargos_info.get(cargo_id)
+        codigo_cat, nombre_cat = _categoria_para_cargo(cargo_id, tipo_cargo)
+        if not codigo_cat or not nombre_cat:
+            continue
+
+        tipo_map = datos.setdefault(tipo_id, {})
+        cat_map = tipo_map.setdefault(
+            codigo_cat,
+            {"nombre": nombre_cat, "total": 0, "porSede": {}},
+        )
+
+        cat_map["total"] = int(cat_map.get("total", 0)) + cantidad
+        por_sede_map: dict[str, int] = cat_map.setdefault("porSede", {})  # type: ignore[assignment]
+        por_sede_map[sede_id] = int(por_sede_map.get(sede_id, 0)) + cantidad
+
+    # Construir respuesta ordenada
+    tipos_resumen: List[TipoPlatoConCategoriasResumen] = []
+
+    definiciones_categorias = [
+        ("NINOS", "Niños"),
+        ("TIAS", "Tías"),
+        ("ADULTOS_IMPORTANTES", "Personas Rendición"),
+        ("ADULTOS_SECUNDARIOS", "Personas no Rendición"),
+    ]
+
+    # Incluir todos los tipos de plato definidos aunque no tengan datos
+    all_tipo_ids = set(tipos_nombres.keys()) | set(datos.keys())
+
+    for tipo_id in sorted(all_tipo_ids, key=lambda k: tipos_nombres.get(k, k)):
+        nombre_tipo = tipos_nombres.get(tipo_id, tipo_id)
+        tipo_map = datos.get(tipo_id, {})
+
+        categorias_resumen: List[TipoPlatoCategoriaResumen] = []
+        for codigo_cat, nombre_cat_def in definiciones_categorias:
+            cat_map = tipo_map.get(codigo_cat)
+            # Si no hubo datos para esta categoría, devolver totales en 0
+            if not cat_map:
+                total_cat = 0
+                por_sede_map: dict[str, int] = {}
+            else:
+                total_cat = int(cat_map.get("total", 0))
+                por_sede_map = cat_map.get("porSede", {}) or {}
+
+            categorias_resumen.append(
+                TipoPlatoCategoriaResumen(
+                    codigo=codigo_cat,
+                    nombre=nombre_cat_def,
+                    total=total_cat,
+                    porSede=[
+                        TipoPlatoCategoriaSedeResumen(
+                            sedeId=sid,
+                            cantidad=int(cant),
+                        )
+                        for sid, cant in por_sede_map.items()
+                    ],
+                )
+            )
+
+        # Siempre incluimos el tipo de plato, aunque todos los valores sean 0
+        tipos_resumen.append(
+            TipoPlatoConCategoriasResumen(
+                codigo=tipo_id,
+                nombre=nombre_tipo,
+                categorias=categorias_resumen,
+            )
+        )
+
+    return ResumenPlatosPorTipoYCargoOut(
+        desde=desde,
+        hasta=hasta,
+        tipos=tipos_resumen,
     )
