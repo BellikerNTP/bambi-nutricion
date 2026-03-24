@@ -1,5 +1,5 @@
 ﻿#define MyAppName "Nutrición Hogar Bambi"
-#define MyAppVersion "0.9.8"
+#define MyAppVersion "0.9.9"
 #define MyAppPublisher "Hogar Bambi"
 #define MongoHost "bambinutricion.27sir9d.mongodb.net"
 #define MongoOptions "/?appName=bambiNutricion"
@@ -150,6 +150,7 @@ begin
     end;
   end;
 end;
+
 
 
 

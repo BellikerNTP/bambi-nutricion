@@ -335,28 +335,39 @@ class ResumenPlatosPorTipoYCargoOut(BaseModel):
 
 @app.get("/sedes", response_model=List[SedeOut])
 def listar_sedes(activa: Optional[bool] = Query(None, alias="activa")):
-    sedes_col = get_collection("sedes")
+    """Lista las sedes.
 
-    query: Dict[str, Any] = {}
-    if activa is True:
-        query["activa"] = 1
-    elif activa is False:
-        query["activa"] = 0
+    Si hay un problema con la conexión a MongoDB, devolvemos un 500 con el
+    detalle del error para poder diagnosticar mejor en entornos de cliente.
+    """
+    try:
+        sedes_col = get_collection("sedes")
 
-    docs = list(sedes_col.find(query).sort("nombre", 1))
+        query: Dict[str, Any] = {}
+        if activa is True:
+            query["activa"] = 1
+        elif activa is False:
+            query["activa"] = 0
 
-    resultados: List[dict[str, Any]] = []
-    for d in docs:
-        resultados.append(
-            {
-                "id": d.get("_id", ""),
-                "nombre": d.get("nombre", ""),
-                "codigo": d.get("codigo", ""),
-                "activa": bool(d.get("activa", 1)),
-            }
-        )
+        docs = list(sedes_col.find(query).sort("nombre", 1))
 
-    return resultados
+        resultados: List[dict[str, Any]] = []
+        for d in docs:
+            resultados.append(
+                {
+                    "id": d.get("_id", ""),
+                    "nombre": d.get("nombre", ""),
+                    "codigo": d.get("codigo", ""),
+                    "activa": bool(d.get("activa", 1)),
+                }
+            )
+
+        return resultados
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al listar sedes (MongoDB): {exc}",
+        ) from exc
 
 
 @app.get("/tipos-platos", response_model=List[TipoPlatoOut])
